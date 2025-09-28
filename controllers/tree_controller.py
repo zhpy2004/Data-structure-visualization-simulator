@@ -1,0 +1,345 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+树形结构控制器 - 负责处理树形数据结构的操作
+"""
+
+from models.tree.binary_tree import BinaryTree
+from models.tree.bst import BST
+from models.tree.huffman_tree import HuffmanTree
+from utils.dsl_parser import parse_tree_dsl
+
+
+class TreeController:
+    """树形结构控制器类，负责处理树形数据结构的操作"""
+    
+    def __init__(self, view):
+        """初始化树形结构控制器
+        
+        Args:
+            view: 树形结构视图对象
+        """
+        self.view = view
+        self.current_structure = None
+        self.structure_type = None
+    
+    def handle_action(self, action_type, params=None):
+        """处理树形结构操作
+        
+        Args:
+            action_type: 操作类型，如'create', 'insert', 'delete', 'search', 'traverse', 'build_huffman', 'encode', 'decode', 'clear'
+            params: 操作参数
+        """
+        if action_type == 'create':
+            structure_type = params.get('structure_type') or params.get('type')
+            values = params.get('values') or params.get('data', [])
+            self._create_structure(structure_type, values)
+        elif action_type == 'insert':
+            value = params.get('value')
+            self._insert_node(value)
+        elif action_type == 'delete' or action_type == 'remove':
+            value = params.get('value')
+            self._delete_node(value)
+        elif action_type == 'search':
+            value = params.get('value')
+            self._search_node(value)
+        elif action_type == 'traverse':
+            traverse_type = params.get('traversal_type') or params.get('traverse_type')
+            self._traverse(traverse_type)
+        elif action_type == 'build_huffman':
+            frequencies = params.get('frequencies') or params.get('values')
+            self._build_huffman_tree(frequencies)
+        elif action_type == 'encode':
+            text = params.get('text')
+            self._encode_text(text)
+        elif action_type == 'decode':
+            binary = params.get('binary')
+            self._decode_binary(binary)
+        elif action_type == 'clear':
+            self._clear_structure()
+        elif action_type == 'change_structure':
+            structure_type = params.get('structure_type')
+            # 当切换数据结构类型时，清空当前结构并创建新的空结构
+            self._create_structure(structure_type, [])
+        else:
+            self.view.show_message("错误", f"未知操作类型: {action_type}")
+    
+    def execute_dsl(self, command):
+        """执行DSL命令
+        
+        Args:
+            command: DSL命令字符串
+        """
+        try:
+            result = parse_tree_dsl(command)
+            if isinstance(result, tuple) and len(result) == 2:
+                action, params = result
+                self.handle_action(action, params)
+            else:
+                self.view.show_message("错误", "DSL命令解析结果格式错误")
+        except Exception as e:
+            self.view.show_message("错误", f"DSL命令执行错误: {str(e)}")
+    
+    def _create_structure(self, structure_type, initial_data=None):
+        """创建树形结构
+        
+        Args:
+            structure_type: 结构类型，'binary_tree', 'bst', 或 'huffman_tree'
+            initial_data: 初始数据列表
+        """
+        if initial_data is None:
+            initial_data = []
+        
+        self.structure_type = structure_type
+        
+        if structure_type == 'binary_tree':
+            self.current_structure = BinaryTree()
+            if initial_data:
+                self.current_structure.build_from_list(initial_data)
+        elif structure_type == 'bst':
+            self.current_structure = BST()
+            for item in initial_data:
+                self.current_structure.insert(item)
+        elif structure_type == 'huffman_tree':
+            self.current_structure = HuffmanTree()
+            if initial_data:
+                self.current_structure.build(initial_data)
+            # 如果没有初始数据，仅创建空的哈夫曼树结构，不进行构建
+        else:
+            self.view.show_message("错误", f"未知结构类型: {structure_type}")
+            return
+        
+        # 更新视图
+        self._update_view()
+    
+    def _insert_node(self, value):
+        """插入节点
+        
+        Args:
+            value: 节点值
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建数据结构")
+            return
+        
+        if self.structure_type == 'huffman_tree':
+            self.view.show_message("错误", "哈夫曼树不支持单独插入节点")
+            return
+        
+        try:
+            # 记录插入前的状态用于动画
+            before_state = self.current_structure.get_visualization_data()
+            
+            # 执行插入操作
+            self.current_structure.insert(value)
+            
+            # 记录插入后的状态用于动画
+            after_state = self.current_structure.get_visualization_data()
+            
+            # 更新视图，传入前后状态用于动画
+            self.view.update_visualization_with_animation(before_state, after_state, 'insert', value)
+        except Exception as e:
+            self.view.show_message("错误", f"插入失败: {str(e)}")
+    
+    def _delete_node(self, value):
+        """删除节点
+        
+        Args:
+            value: 节点值
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建数据结构")
+            return
+        
+        if self.structure_type not in ['bst']:
+            self.view.show_message("错误", f"{self.structure_type}不支持删除操作")
+            return
+        
+        try:
+            # 记录删除前的状态用于动画
+            before_state = self.current_structure.get_visualization_data()
+            
+            # 执行删除操作
+            self.current_structure.delete(value)
+            
+            # 记录删除后的状态用于动画
+            after_state = self.current_structure.get_visualization_data()
+            
+            # 更新视图，传入前后状态用于动画
+            self.view.update_visualization_with_animation(before_state, after_state, 'delete', value)
+        except Exception as e:
+            self.view.show_message("错误", f"删除失败: {str(e)}")
+    
+    def _search_node(self, value):
+        """搜索节点
+        
+        Args:
+            value: 节点值
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建数据结构")
+            return
+        
+        if self.structure_type not in ['bst']:
+            self.view.show_message("错误", f"{self.structure_type}不支持搜索操作")
+            return
+        
+        try:
+            # 执行搜索操作，获取搜索路径
+            found, path = self.current_structure.search(value)
+            
+            # 更新视图，显示搜索路径
+            self.view.highlight_search_path(path, found, value)
+            
+            # 不再立即显示结果弹窗，而是在动画结束后显示
+            # 结果弹窗将在动画完成后由视图类显示
+        except Exception as e:
+            self.view.show_message("错误", f"搜索失败: {str(e)}")
+    
+    def _build_huffman_tree(self, frequencies):
+        """构建哈夫曼树
+        
+        Args:
+            frequencies: 字符频率字典，格式为 {字符: 频率}
+        """
+        if not frequencies:
+            self.view.show_message("错误", "请提供频率数据")
+            return
+        
+        try:
+            # 创建哈夫曼树
+            self.structure_type = 'huffman_tree'
+            self.current_structure = HuffmanTree()
+            
+            # 记录构建过程中的每一步状态
+            build_steps = self.current_structure.build_with_steps(frequencies)
+            
+            # 更新视图，显示哈夫曼树构建过程的动画
+            self.view.show_huffman_build_animation(build_steps)
+        except Exception as e:
+            self.view.show_message("错误", f"构建哈夫曼树失败: {str(e)}")
+    
+    def _encode_text(self, text):
+        """使用哈夫曼编码对文本进行编码
+        
+        Args:
+            text: 要编码的文本
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建哈夫曼树")
+            return
+        
+        if self.structure_type != 'huffman_tree':
+            self.view.show_message("错误", "当前结构不是哈夫曼树，不支持编码操作")
+            return
+        
+        try:
+            # 执行编码操作
+            encoded = self.current_structure.encode(text)
+            
+            # 显示编码结果
+            self.view.show_message("编码结果", f"原文本: {text}\n编码结果: {encoded}")
+            
+            # 添加编码可视化效果
+            # 保存编码表到视图对象
+            self.view.huffman_codes = self.current_structure.codes
+            self.view.highlight_huffman_codes(text, self.current_structure.codes)
+        except Exception as e:
+            self.view.show_message("错误", f"编码失败: {str(e)}")
+    
+    def _decode_binary(self, binary):
+        """使用哈夫曼编码对二进制字符串进行解码
+        
+        Args:
+            binary: 要解码的二进制字符串
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建哈夫曼树")
+            return
+        
+        if self.structure_type != 'huffman_tree':
+            self.view.show_message("错误", "当前结构不是哈夫曼树，不支持解码操作")
+            return
+        
+        try:
+            # 执行解码操作
+            decoded = self.current_structure.decode(binary)
+            
+            # 显示解码结果
+            self.view.show_message("解码结果", f"二进制编码: {binary}\n解码结果: {decoded}")
+            
+            # 添加解码可视化效果
+            # 保存编码表到视图对象
+            self.view.huffman_codes = self.current_structure.codes
+            self.view.highlight_huffman_decode_path(binary, decoded)
+        except Exception as e:
+            self.view.show_message("错误", f"解码失败: {str(e)}")
+    
+    def _update_view(self):
+        """更新视图显示"""
+        if self.current_structure is None:
+            return
+        
+        # 获取当前结构的可视化数据
+        data = self.current_structure.get_visualization_data()
+        
+        # 更新视图
+        self.view.update_visualization(data, self.structure_type)
+        
+    def _clear_structure(self):
+        """清空当前数据结构"""
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建数据结构")
+            return
+        
+        try:
+            # 清空当前结构
+            self.current_structure.clear()
+            self._update_view()
+            self.view.show_message("成功", "数据结构已清空")
+        except Exception as e:
+            self.view.show_message("错误", f"清空失败: {str(e)}")
+        
+    def _traverse(self, traverse_type):
+        """遍历树结构
+        
+        Args:
+            traverse_type: 遍历类型，'preorder', 'inorder', 'postorder', 或 'levelorder'
+        """
+        if self.current_structure is None:
+            self.view.show_message("错误", "请先创建数据结构")
+            return
+        
+        # 确保遍历类型有效
+        if traverse_type is None:
+            print(f"警告：收到无效的遍历类型: 'None'，使用默认前序遍历")
+            traverse_type = 'preorder'  # 设置默认值为前序遍历
+        elif traverse_type.lower() not in ['preorder', 'inorder', 'postorder', 'levelorder']:
+            print(f"警告：收到无效的遍历类型: '{traverse_type}'，使用默认前序遍历")
+            traverse_type = 'preorder'  # 设置默认值为前序遍历
+        else:
+            # 标准化遍历类型（转为小写）
+            traverse_type = traverse_type.lower()
+        
+        try:
+            result = []
+            if traverse_type == 'preorder':
+                result = self.current_structure.preorder_traversal()
+            elif traverse_type == 'inorder':
+                result = self.current_structure.inorder_traversal()
+            elif traverse_type == 'postorder':
+                result = self.current_structure.postorder_traversal()
+            elif traverse_type == 'levelorder':
+                result = self.current_structure.levelorder_traversal()
+            else:
+                # 这个分支理论上不会执行到，因为我们已经在上面验证了遍历类型
+                self.view.show_message("错误", f"未知遍历类型: {traverse_type}")
+                return
+            
+            # 高亮显示遍历路径（动画会在结束时显示结果）
+            self.view.highlight_traversal_path(result, traverse_type)
+            
+            # 注意：遍历结果将在动画结束后由视图类显示
+        except Exception as e:
+            self.view.show_message("错误", f"遍历失败: {str(e)}")
