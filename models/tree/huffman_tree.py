@@ -39,11 +39,26 @@ class HuffmanNode:
 class HuffmanTree:
     """哈夫曼树类"""
     
+    def get_frequency_data(self):
+        """获取频率数据，用于保存和重建哈夫曼树
+        
+        Returns:
+            dict: 字符频率字典，如果没有频率数据则返回空字典
+        """
+        # 返回保存的频率数据
+        if hasattr(self, 'frequencies') and self.frequencies:
+            return self.frequencies
+        # 如果没有保存频率数据，但有编码表，则返回默认频率
+        elif hasattr(self, 'codes') and self.codes:
+            return {char: 1 for char in self.codes.keys()}
+        return {}
+    
     def __init__(self):
         """初始化哈夫曼树"""
         self.root = None
         self.codes = {}  # 哈夫曼编码表 {字符: 编码}
         self.size = 0
+        self.frequencies = {}  # 存储字符频率字典
     
     def is_empty(self):
         """判断哈夫曼树是否为空
@@ -64,6 +79,9 @@ class HuffmanTree:
         
         # 清空现有树
         self.clear()
+        
+        # 保存频率数据，用于后续保存和加载
+        self.frequencies = dict(frequencies)
         
         # 创建叶子节点并加入优先队列
         pq = []

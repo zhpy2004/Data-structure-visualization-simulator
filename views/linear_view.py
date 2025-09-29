@@ -26,6 +26,18 @@ class LinearView(QWidget):
             message: 消息内容
         """
         QMessageBox.information(self, title, message)
+        
+    def update_view(self, structure):
+        """更新视图显示
+        
+        Args:
+            structure: 要显示的数据结构对象
+        """
+        # 触发视图重绘
+        if hasattr(self, 'visualization_area'):
+            self.visualization_area.structure = structure
+            self.visualization_area.update()
+        print(f"更新数据: 类型={getattr(structure, '__class__.__name__', 'Unknown')}, 数据长度={getattr(structure, 'size', 0)}")
     
     def __init__(self):
         """初始化线性结构视图"""

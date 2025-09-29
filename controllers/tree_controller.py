@@ -62,8 +62,85 @@ class TreeController:
             structure_type = params.get('structure_type')
             # 当切换数据结构类型时，清空当前结构并创建新的空结构
             self._create_structure(structure_type, [])
+        elif action_type == 'save':
+            # 保存当前数据结构
+            return self.get_structure_data()
+        elif action_type == 'load':
+            # 加载数据结构
+            structure_type = params.get('structure_type')
+            data = params.get('data')
+            self.load_structure(structure_type, data)
         else:
             self.view.show_message("错误", f"未知操作类型: {action_type}")
+            
+    def get_structure_data(self):
+        """获取当前数据结构的数据，用于保存
+        
+        Returns:
+            dict: 包含数据结构状态的字典
+        """
+        if not self.current_structure:
+            return None
+            
+        # 根据不同的数据结构类型，获取其数据
+        data = {
+            'structure_type': self.structure_type
+        }
+        
+        if self.structure_type == 'binary_tree':
+            # 二叉树序列化为层序遍历数组
+            data['tree_data'] = self.current_structure.levelorder_traversal()
+        elif self.structure_type == 'bst':
+            # BST序列化为层序遍历数组
+            data['tree_data'] = self.current_structure.levelorder_traversal()
+        elif self.structure_type == 'huffman_tree':
+            # 哈夫曼树保存原始频率数据
+            data['frequency_data'] = self.current_structure.get_frequency_data()
+        
+        return data
+        
+    def load_structure(self, structure_type, data):
+        """从保存的数据加载数据结构
+        
+        Args:
+            structure_type: 数据结构类型
+            data: 保存的数据
+        """
+        if not data:
+            return
+        
+        # 首先切换到对应的数据结构类型
+        # 在视图中查找对应的数据结构类型索引并切换
+        structure_index = -1
+        for i in range(self.view.structure_combo.count()):
+            if self.view.structure_combo.itemData(i) == structure_type:
+                structure_index = i
+                break
+        
+        # 如果找到了对应的数据结构类型，切换到该类型
+        if structure_index >= 0:
+            print(f"切换到数据结构类型: {structure_type}, 索引: {structure_index}")
+            self.view.structure_combo.setCurrentIndex(structure_index)
+            # 这会触发_structure_changed方法，更新UI和当前结构类型
+        else:
+            print(f"未找到数据结构类型: {structure_type}")
+            
+        # 根据不同的数据结构类型，加载数据
+        if structure_type == 'binary_tree':
+            tree_data = data.get('tree_data')
+            if tree_data:
+                self._create_structure(structure_type, tree_data)
+        elif structure_type == 'bst':
+            tree_data = data.get('tree_data')
+            if tree_data:
+                self._create_structure(structure_type, tree_data)
+        elif structure_type == 'huffman_tree':
+            frequency_data = data.get('frequency_data')
+            if frequency_data:
+                self._build_huffman_tree(frequency_data)
+                
+        # 更新视图
+        self.view.update_view(self.current_structure)
     
     def execute_dsl(self, command):
         """执行DSL命令
@@ -211,6 +288,9 @@ class TreeController:
             # 创建哈夫曼树
             self.structure_type = 'huffman_tree'
             self.current_structure = HuffmanTree()
+            
+            # 保存频率数据，用于后续保存和加载
+            self.current_structure.frequencies = dict(frequencies)
             
             # 记录构建过程中的每一步状态
             build_steps = self.current_structure.build_with_steps(frequencies)

@@ -55,6 +55,57 @@ class LinearController:
             self._create_structure(structure_type, [])
         else:
             self.view.show_message("错误", f"未知操作类型: {action_type}")
+            
+    def get_structure_data(self):
+        """获取当前数据结构的数据，用于保存
+        
+        Returns:
+            dict: 包含数据结构状态的字典
+        """
+        if not self.current_structure:
+            return None
+            
+        # 根据不同的数据结构类型，获取其数据
+        if self.structure_type == "array_list":
+            # ArrayList的数据存储在data属性中，只取有效数据
+            elements = self.current_structure.data[:self.current_structure.size]
+            return {"elements": elements}
+        elif self.structure_type == "linked_list":
+            return {"elements": self.current_structure.to_list()}
+        elif self.structure_type == "stack":
+            return {"elements": self.current_structure.to_list()}
+        return None
+        
+    def load_structure(self, structure_type, data):
+        """从保存的数据加载数据结构
+        
+        Args:
+            structure_type: 数据结构类型
+            data: 保存的数据
+        """
+        print(f"加载线性结构: 类型={structure_type}, 数据={data}")
+        
+        # 设置结构类型
+        self.structure_type = structure_type
+        
+        # 然后加载数据
+        if not data:
+            print("没有数据")
+            return
+            
+        # 获取元素列表
+        elements = data.get("elements", [])
+        print(f"加载元素: {elements}")
+        
+        # 创建指定类型的数据结构并加载元素
+        self._create_structure(structure_type, elements)
+        
+        print(f"加载完成，当前结构: {self.current_structure}")
+        
+        # 强制更新视图
+        if self.view:
+            print("更新视图")
+            self.view.update_view(self.current_structure)
     
     def execute_dsl(self, command):
         """执行DSL命令

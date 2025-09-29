@@ -26,6 +26,19 @@ class LinkedList:
         """初始化链表"""
         self.head = None
         self.size = 0
+        
+    def to_list(self):
+        """将链表转换为列表
+        
+        Returns:
+            list: 包含链表所有元素的列表
+        """
+        result = []
+        current = self.head
+        while current:
+            result.append(current.data)
+            current = current.next
+        return result
     
     def is_empty(self):
         """判断链表是否为空

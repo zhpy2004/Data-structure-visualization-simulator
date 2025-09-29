@@ -20,6 +20,19 @@ class TreeView(QWidget):
     # 自定义信号
     operation_triggered = pyqtSignal(str, dict)  # 操作触发信号
     
+    def update_view(self, structure):
+        """更新视图显示
+        
+        Args:
+            structure: 要显示的数据结构
+        """
+        print(f"更新树形视图: 类型={type(structure).__name__}")
+        if hasattr(self, 'visualization_area'):
+            self.visualization_area.structure = structure
+            self.visualization_area.update()
+        else:
+            print("警告: visualization_area不存在")
+    
     def show_message(self, title, message):
         """显示消息对话框
         

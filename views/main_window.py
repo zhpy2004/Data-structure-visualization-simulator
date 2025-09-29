@@ -23,6 +23,8 @@ class MainWindow(QMainWindow):
     linear_action_triggered = pyqtSignal(str, dict)  # 线性结构操作信号
     tree_action_triggered = pyqtSignal(str, dict)    # 树形结构操作信号
     dsl_executed = pyqtSignal(str)                   # DSL命令执行信号
+    save_structure_requested = pyqtSignal()          # 保存数据结构信号
+    load_structure_requested = pyqtSignal()          # 加载数据结构信号
     
     def __init__(self):
         """初始化主窗口"""
@@ -150,10 +152,16 @@ class MainWindow(QMainWindow):
         
         # 保存操作
         save_action = QAction("保存", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.setStatusTip("保存当前数据结构到文件")
+        save_action.triggered.connect(self._save_structure)
         file_menu.addAction(save_action)
         
         # 加载操作
         load_action = QAction("加载", self)
+        load_action.setShortcut("Ctrl+O")
+        load_action.setStatusTip("从文件加载数据结构")
+        load_action.triggered.connect(self._load_structure)
         file_menu.addAction(load_action)
         
         # 添加分隔符
@@ -286,6 +294,16 @@ class MainWindow(QMainWindow):
         """
         
         QMessageBox.about(self, "关于", about_text)
+    
+    def _save_structure(self):
+        """保存当前数据结构"""
+        # 发送信号通知控制器保存当前数据结构
+        self.save_structure_requested.emit()
+        
+    def _load_structure(self):
+        """加载数据结构"""
+        # 发送信号通知控制器加载数据结构
+        self.load_structure_requested.emit()
     
     def show_message(self, message):
         """在状态栏显示消息

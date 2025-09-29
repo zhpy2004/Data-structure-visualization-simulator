@@ -18,6 +18,16 @@ class Stack:
         self.capacity = capacity
         self.data = [None] * capacity
         self.top = -1  # 栈顶指针，-1表示空栈
+        
+    def to_list(self):
+        """将栈转换为列表
+        
+        Returns:
+            list: 包含栈中所有元素的列表（从栈底到栈顶）
+        """
+        if self.is_empty():
+            return []
+        return [self.data[i] for i in range(self.top + 1)]
     
     def is_empty(self):
         """判断栈是否为空

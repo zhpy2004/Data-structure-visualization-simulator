@@ -42,6 +42,31 @@ class BinaryTree:
         size: 二叉树的节点数量。
     """
     
+    def serialize(self):
+        """序列化二叉树为层序遍历数组
+        
+        Returns:
+            list: 层序遍历数组
+        """
+        return self.levelorder_traversal()
+        
+    def deserialize(self, data):
+        """从层序遍历数组反序列化二叉树
+        
+        Args:
+            data: 层序遍历数组
+        """
+        if not data:
+            return
+            
+        # 清空当前树
+        self.root = None
+        
+        # 重建树
+        for value in data:
+            if value is not None:
+                self.insert(value)
+    
     def __init__(self):
         """初始化一个空的二叉树。"""
         self.root = None

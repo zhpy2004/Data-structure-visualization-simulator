@@ -29,6 +29,31 @@ class BST:
         """初始化二叉搜索树"""
         self.root = None
         self.size = 0
+        
+    def levelorder_traversal(self):
+        """层序遍历二叉搜索树
+        
+        Returns:
+            list: 层序遍历结果列表
+        """
+        if not self.root:
+            return []
+            
+        result = []
+        queue = deque([self.root])
+        
+        while queue:
+            node = queue.popleft()
+            if node:
+                result.append(node.data)
+                if node.left:
+                    queue.append(node.left)
+                if node.right:
+                    queue.append(node.right)
+            else:
+                result.append(None)
+                
+        return result
     
     def is_empty(self):
         """判断二叉搜索树是否为空
