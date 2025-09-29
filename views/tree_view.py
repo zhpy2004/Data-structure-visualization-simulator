@@ -101,6 +101,12 @@ class TreeView(QWidget):
         # 当前选择的数据结构类型
         self.current_structure = "binary_tree"  # 默认为二叉树
         
+        # 初始化哈夫曼动画相关属性
+        self.huffman_animation_timer = QTimer()
+        self.animation_speed = 1000  # 默认动画速度：1秒一步
+        self.huffman_build_steps = []
+        self.current_build_step = 0
+        
         # 初始化UI
         self._init_ui()
         
@@ -151,8 +157,8 @@ class TreeView(QWidget):
         operations_layout.addLayout(common_form)
         
         # 创建遍历方式选择
-        traversal_group = QGroupBox("遍历方式")
-        traversal_layout = QHBoxLayout(traversal_group)
+        self.traversal_box = QGroupBox("遍历方式")
+        traversal_layout = QHBoxLayout(self.traversal_box)
         
         self.traversal_group = QButtonGroup(self)
         
@@ -173,7 +179,7 @@ class TreeView(QWidget):
         traversal_layout.addWidget(self.postorder_radio)
         traversal_layout.addWidget(self.levelorder_radio)
         
-        operations_layout.addWidget(traversal_group)
+        operations_layout.addWidget(self.traversal_box)
         
         # 创建操作按钮布局
         buttons_layout = QHBoxLayout()
@@ -271,10 +277,17 @@ class TreeView(QWidget):
         # 连接哈夫曼树特有操作按钮
         self.encode_button.clicked.connect(self._encode_text)
         self.decode_button.clicked.connect(self._decode_text)
+
         
         # 连接遍历控制按钮
-        self.prev_step_button.clicked.connect(self._prev_traversal_step)
-        self.next_step_button.clicked.connect(self._next_traversal_step)
+        self.prev_step_button.clicked.connect(self._prev_step)
+        self.next_step_button.clicked.connect(self._next_step)
+        
+        # 连接动画控制按钮
+
+        
+        # 连接哈夫曼动画定时器
+        self.huffman_animation_timer.timeout.connect(self._animate_huffman_build)
     
     def _structure_changed(self, index):
         """数据结构类型改变处理
@@ -290,10 +303,37 @@ class TreeView(QWidget):
             # 显示哈夫曼树特有操作按钮
             self.encode_button.show()
             self.decode_button.show()
-        else:
+            # 隐藏哈夫曼树不需要的按钮
+            self.insert_button.hide()
+            self.remove_button.hide()
+            self.search_button.hide()
+            self.traverse_button.hide()
+            # 隐藏遍历方式选择框
+            self.traversal_box.hide()
+        elif self.current_structure == "binary_tree":
+            # 二叉树页面隐藏搜索按钮
+            self.search_button.hide()
+            # 显示其他按钮
+            self.insert_button.show()
+            self.remove_button.show()
+            self.traverse_button.show()
             # 隐藏哈夫曼树特有操作按钮
             self.encode_button.hide()
             self.decode_button.hide()
+            # 显示遍历方式选择框
+            self.traversal_box.show()
+        elif self.current_structure == "bst":
+            # 二叉搜索树页面隐藏遍历按钮
+            self.traverse_button.hide()
+            # 显示其他按钮
+            self.insert_button.show()
+            self.remove_button.show()
+            self.search_button.show()
+            # 隐藏哈夫曼树特有操作按钮
+            self.encode_button.hide()
+            self.decode_button.hide()
+            # 隐藏遍历方式选择框
+            self.traversal_box.hide()
         
         # 发射操作信号
         self.operation_triggered.emit("change_structure", {"structure_type": self.current_structure})
@@ -341,6 +381,15 @@ class TreeView(QWidget):
                 "structure_type": self.current_structure,
                 "values": values
             })
+            
+            # 如果是哈夫曼树，自动开始构建动画
+            if self.current_structure == "huffman_tree":
+                # 先触发构建动画信号，生成构建步骤
+                self.operation_triggered.emit("build_huffman", {
+                    "frequencies": values
+                })
+                # 然后开始哈夫曼树构建动画
+                self.start_huffman_build_animation()
             
             # 更新状态
             self.status_label.setText(f"已创建{self.structure_combo.currentText()}")
@@ -788,16 +837,21 @@ class TreeView(QWidget):
         Args:
             build_steps: 构建过程中的每一步状态
         """
-        # 直接使用最终状态更新画布
-        if build_steps and len(build_steps) > 0:
-            final_state = build_steps[-1]
-            self.canvas.update_data(final_state)
-            
-            # 更新状态标签
-            self.status_label.setText(f"哈夫曼树构建完成，共{len(build_steps)}步")
-            
-            # 重绘画布
-            self.canvas.update()
+        if not build_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        self.stop_huffman_animation()
+        
+        # 设置构建步骤数据
+        self.huffman_build_steps = build_steps
+        self.current_build_step = 0
+        
+        # 更新状态标签
+        self.status_label.setText(f"哈夫曼树构建动画开始，共{len(build_steps)}步")
+        
+        # 开始动画
+        self.start_huffman_build_animation()
     
     def show_result(self, operation, result):
         """显示操作结果
@@ -844,6 +898,302 @@ class TreeView(QWidget):
             格式化后的编码表字符串
         """
         return "\n".join([f"{char}: {code}" for char, code in code_table.items()])
+    
+    def _build_huffman_animation(self):
+        """触发哈夫曼树构建动画"""
+        # 获取输入的频率数据
+        values_text = self.value_input.text().strip()
+        
+        if not values_text:
+            QMessageBox.warning(self, "警告", "请输入频率数据")
+            return
+        
+        try:
+            # 解析用户输入的频率对，格式如：A:5,B:9,C:12
+            frequencies = {}
+            pairs = values_text.split(",")
+            for pair in pairs:
+                if ":" in pair:
+                    char, freq = pair.split(":")
+                    frequencies[char.strip()] = int(freq.strip())
+                else:
+                    raise ValueError("哈夫曼树输入格式应为：字符:频率,字符:频率,...")
+            
+            # 发射操作信号，包含频率数据
+            self.operation_triggered.emit("build_huffman", {
+                "frequencies": frequencies
+            })
+            
+            # 初始化动画状态
+            if self.huffman_build_steps:
+                self.current_build_step = 0
+                self._show_huffman_step(0)
+                
+                # 启用上一步/下一步按钮
+                self.prev_step_button.setEnabled(False)  # 第一步不能再往前
+                self.next_step_button.setEnabled(True)
+                
+                self.status_label.setText("哈夫曼树构建动画准备就绪，请点击下一步继续")
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "警告", str(e) if str(e) else "请输入有效的频率数据")
+    
+    def _prev_step(self):
+        """通用的上一步方法，根据当前动画类型调用相应的方法"""
+        # 优先检查哈夫曼树构建动画
+        if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+            self._prev_huffman_step()
+        # 然后检查遍历和搜索动画
+        elif hasattr(self.canvas, 'traversal_order') and hasattr(self.canvas, 'traversal_type'):
+            self._prev_traversal_step()
+        elif hasattr(self.canvas, 'search_target'):
+            self._prev_traversal_step()  # 搜索动画也使用遍历步骤控制
+
+    def _next_step(self):
+        """通用的下一步方法，根据当前动画类型调用相应的方法"""
+        # 优先检查哈夫曼树构建动画
+        if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+            self._next_huffman_step()
+        # 然后检查遍历和搜索动画
+        elif hasattr(self.canvas, 'traversal_order') and hasattr(self.canvas, 'traversal_type'):
+            self._next_traversal_step()
+        elif hasattr(self.canvas, 'search_target'):
+            self._next_traversal_step()  # 搜索动画也使用遍历步骤控制
+    
+    def _prev_huffman_step(self):
+        """显示哈夫曼树构建的上一步"""
+        if not self.huffman_build_steps:
+            return
+            
+        # 移动到上一步
+        if self.current_build_step > 0:
+            self.current_build_step -= 1
+            self._show_huffman_step(self.current_build_step)
+            
+            # 更新按钮状态
+            self.next_step_button.setEnabled(True)
+            if self.current_build_step == 0:
+                self.prev_step_button.setEnabled(False)
+                
+            self.status_label.setText(f"哈夫曼树构建步骤 {self.current_build_step + 1}/{len(self.huffman_build_steps)}")
+    
+    def _next_huffman_step(self):
+        """显示哈夫曼树构建的下一步"""
+        if not self.huffman_build_steps:
+            return
+            
+        # 移动到下一步
+        if self.current_build_step < len(self.huffman_build_steps) - 1:
+            self.current_build_step += 1
+            self._show_huffman_step(self.current_build_step)
+            
+            # 更新按钮状态
+            self.prev_step_button.setEnabled(True)
+            
+            # 检查是否到达最后一步
+            if self.current_build_step == len(self.huffman_build_steps) - 1:
+                self.next_step_button.setEnabled(False)
+                self.status_label.setText("哈夫曼树构建完成")
+            else:
+                self.status_label.setText(f"哈夫曼树构建步骤 {self.current_build_step + 1}/{len(self.huffman_build_steps)}")
+        else:
+            # 已经是最后一步，显示最终结果
+            self.status_label.setText("哈夫曼树构建完成")
+    
+    def _change_animation_speed(self):
+        """改变动画播放速度"""
+        # 循环切换速度：正常 -> 快速 -> 慢速 -> 正常
+        if self.animation_speed == 1000:  # 正常速度
+            self.animation_speed = 500   # 快速
+        elif self.animation_speed == 500:  # 快速
+            self.animation_speed = 2000  # 慢速
+        else:  # 慢速
+            self.animation_speed = 1000  # 正常
+        
+        # 如果动画正在播放，更新定时器间隔
+        if self.huffman_animation_timer.isActive():
+            self.huffman_animation_timer.setInterval(self.animation_speed)
+    
+    def start_huffman_build_animation(self):
+        """开始哈夫曼树构建动画"""
+        if not self.huffman_build_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        if self.huffman_animation_timer.isActive():
+            self.huffman_animation_timer.stop()
+        
+        # 初始化动画状态
+        self.current_build_step = 0
+        
+        # 显示第一步
+        self._show_huffman_step(0)
+        
+        # 启用上一步/下一步按钮
+        self.prev_step_button.setEnabled(False)  # 第一步不能再往前
+        self.next_step_button.setEnabled(True)
+        
+        self.status_label.setText(f"哈夫曼树构建步骤 1/{len(self.huffman_build_steps)}")
+    
+    def stop_huffman_animation(self):
+        """停止哈夫曼树构建动画"""
+        if self.huffman_animation_timer.isActive():
+            self.huffman_animation_timer.stop()
+        
+        # 重置动画状态
+        self.current_build_step = 0
+    
+    def _animate_huffman_build(self):
+        """哈夫曼树构建动画处理函数"""
+        if not self.huffman_build_steps:
+            self.huffman_animation_timer.stop()
+            return
+        
+        # 移动到下一步
+        self.current_build_step += 1
+        
+        # 检查是否完成动画
+        if self.current_build_step >= len(self.huffman_build_steps):
+            # 动画完成，停止定时器
+            self.huffman_animation_timer.stop()
+            self.status_label.setText("哈夫曼树构建动画完成")
+            return
+        
+        # 显示当前步骤
+        self._show_huffman_step(self.current_build_step)
+    
+    def _show_huffman_step(self, step_index):
+        """显示哈夫曼树构建的特定步骤"""
+        if step_index >= len(self.huffman_build_steps):
+            return
+        
+        step_data = self.huffman_build_steps[step_index]
+        
+        # 更新状态标签
+        description = step_data.get('description', f'步骤 {step_index + 1}')
+        self.status_label.setText(f"步骤 {step_index + 1}/{len(self.huffman_build_steps)}: {description}")
+        
+        # 准备可视化数据
+        visualization_data = {
+            'type': 'huffman_tree',
+            'nodes': [],
+            'highlighted': step_data.get('highlight_nodes', [])
+        }
+        
+        # 根据步骤类型显示不同内容
+        action = step_data.get('action', 'unknown')
+        
+        if action == 'initialize':
+            # 初始化步骤：显示优先队列中的节点
+            queue_nodes = step_data.get('queue_nodes', [])
+            for i, node in enumerate(queue_nodes):
+                visualization_data['nodes'].append({
+                    'id': node['id'],
+                    'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
+                    'freq': node['freq'],
+                    'char': node['char'],
+                    'level': 0,
+                    'x_pos': 0.1 + (0.8 * i / (len(queue_nodes) - 1 if len(queue_nodes) > 1 else 1)),
+                    'is_leaf': node.get('is_leaf', True)
+                })
+        
+        elif action == 'merge':
+            # 合并步骤：显示当前树和剩余队列节点
+            current_tree = step_data.get('current_tree')
+            if current_tree and current_tree.get('nodes'):
+                # 添加当前树的节点
+                tree_nodes = current_tree['nodes']
+                for node in tree_nodes:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
+                        'freq': node['freq'],
+                        'char': node['char'],
+                        'level': self._calculate_node_level(node, tree_nodes),
+                        'x_pos': self._calculate_node_x_pos(node, tree_nodes),
+                        'is_leaf': node.get('is_leaf', node['char'] is not None),
+                        'parent_id': node.get('parent_id')
+                    })
+            
+            # 添加队列中剩余的节点（显示在底部）
+            queue_nodes = step_data.get('queue_nodes', [])
+            max_level = max([node.get('level', 0) for node in visualization_data['nodes']], default=0)
+            for i, node in enumerate(queue_nodes):
+                visualization_data['nodes'].append({
+                    'id': node['id'],
+                    'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
+                    'freq': node['freq'],
+                    'char': node['char'],
+                    'level': max_level + 2,  # 放在树的下方
+                    'x_pos': 0.1 + (0.8 * i / (len(queue_nodes) - 1 if len(queue_nodes) > 1 else 1)),
+                    'is_leaf': node.get('is_leaf', True)
+                })
+        
+        elif action == 'complete':
+            # 完成步骤：显示最终的哈夫曼树
+            final_tree = step_data.get('current_tree')
+            if final_tree and final_tree.get('nodes'):
+                tree_nodes = final_tree['nodes']
+                for node in tree_nodes:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
+                        'freq': node['freq'],
+                        'char': node['char'],
+                        'level': self._calculate_node_level(node, tree_nodes),
+                        'x_pos': self._calculate_node_x_pos(node, tree_nodes),
+                        'is_leaf': node.get('is_leaf', node['char'] is not None),
+                        'parent_id': node.get('parent_id')
+                    })
+        
+        # 更新画布数据
+        self.canvas.update_data(visualization_data)
+    
+    def _calculate_node_level(self, node, all_nodes):
+        """计算节点的层级"""
+        if node.get('parent_id') is None:
+            return 0
+        
+        parent = next((n for n in all_nodes if n['id'] == node['parent_id']), None)
+        if parent:
+            return self._calculate_node_level(parent, all_nodes) + 1
+        else:
+            return 0
+    
+    def _calculate_node_x_pos(self, node, all_nodes):
+        """计算节点的水平位置"""
+        # 如果是根节点，放在中间
+        if node.get('parent_id') is None:
+            return 0.5
+        
+        # 找到父节点
+        parent = next((n for n in all_nodes if n['id'] == node['parent_id']), None)
+        if not parent:
+            return 0.5
+        
+        # 找到所有兄弟节点
+        siblings = [n for n in all_nodes if n.get('parent_id') == node['parent_id']]
+        
+        if len(siblings) == 1:
+            # 如果只有一个子节点，放在父节点正下方
+            return self._calculate_node_x_pos(parent, all_nodes)
+        elif len(siblings) == 2:
+            # 如果有两个子节点，分别放在左右
+            parent_x = self._calculate_node_x_pos(parent, all_nodes)
+            level = self._calculate_node_level(node, all_nodes)
+            offset = 0.3 / (level + 1)  # 层级越深，偏移越小
+            
+            # 根据节点在兄弟中的位置决定左右
+            if siblings[0]['id'] == node['id']:
+                return parent_x - offset  # 左子节点
+            else:
+                return parent_x + offset  # 右子节点
+        else:
+            # 多个子节点的情况（理论上哈夫曼树不会出现）
+            parent_x = self._calculate_node_x_pos(parent, all_nodes)
+            sibling_index = next((i for i, s in enumerate(siblings) if s['id'] == node['id']), 0)
+            offset = (sibling_index / (len(siblings) - 1) - 0.5) * 0.4
+            return parent_x + offset
 
 
 class TreeCanvas(QWidget):
@@ -1046,6 +1396,12 @@ class TreeCanvas(QWidget):
         
         # 更新节点数据
         self.data = processed_nodes
+        
+        # 触发重绘以显示更新的数据
+        self.update()
+        
+        # 强制处理事件以确保立即重绘
+        QApplication.processEvents()
     
     def paintEvent(self, event):
         """绘制事件

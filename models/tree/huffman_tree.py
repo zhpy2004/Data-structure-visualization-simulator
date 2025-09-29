@@ -112,20 +112,28 @@ class HuffmanTree:
         
         # 创建叶子节点并加入优先队列
         pq = []
+        node_id_counter = 0
         for char, freq in frequencies.items():
             node = HuffmanNode(char, freq)
+            node.node_id = node_id_counter  # 为动画添加唯一ID
+            node_id_counter += 1
             heapq.heappush(pq, node)
         
         # 记录初始状态
-        initial_nodes = list(pq)  # 复制一份，因为pq会被修改
+        initial_nodes = sorted(list(pq), key=lambda x: x.freq)  # 按频率排序显示
         steps.append({
             'step': 0,
-            'description': '初始叶子节点',
-            'nodes': [{'char': node.char, 'freq': node.freq} for node in initial_nodes],
-            'tree': None
+            'description': '初始化：创建叶子节点',
+            'action': 'initialize',
+            'queue_nodes': [{'id': node.node_id, 'char': node.char, 'freq': node.freq, 'is_leaf': True} for node in initial_nodes],
+            'merged_nodes': [],
+            'current_tree': None,
+            'highlight_nodes': []
         })
         
         step_count = 1
+        merged_trees = []  # 存储已合并的子树
+        
         # 构建哈夫曼树
         while len(pq) > 1:
             # 取出两个频率最小的节点
@@ -136,17 +144,28 @@ class HuffmanTree:
             internal = HuffmanNode(None, left.freq + right.freq)
             internal.left = left
             internal.right = right
+            internal.node_id = node_id_counter
+            node_id_counter += 1
             
             # 将新节点加入优先队列
             heapq.heappush(pq, internal)
             
+            # 记录合并的子树
+            merged_tree_data = self._get_tree_data(internal)
+            merged_trees.append(merged_tree_data)
+            
             # 记录当前状态
-            current_tree = self._clone_tree(internal)
+            remaining_nodes = sorted(list(pq), key=lambda x: x.freq)
             steps.append({
                 'step': step_count,
-                'description': f'合并节点 {left.char if left.char else "内部节点"} ({left.freq}) 和 {right.char if right.char else "内部节点"} ({right.freq})',
-                'nodes': [{'char': node.char, 'freq': node.freq} for node in pq],
-                'tree': self._get_tree_data(current_tree)
+                'description': f'合并节点：{self._get_node_display_name(left)} (频率:{left.freq}) + {self._get_node_display_name(right)} (频率:{right.freq}) = 内部节点 (频率:{internal.freq})',
+                'action': 'merge',
+                'queue_nodes': [{'id': node.node_id, 'char': node.char, 'freq': node.freq, 'is_leaf': node.char is not None} for node in remaining_nodes],
+                'merged_nodes': [{'id': left.node_id, 'char': left.char, 'freq': left.freq}, {'id': right.node_id, 'char': right.char, 'freq': right.freq}],
+                'new_node': {'id': internal.node_id, 'char': None, 'freq': internal.freq},
+                'current_tree': merged_tree_data,
+                'all_trees': [tree for tree in merged_trees],
+                'highlight_nodes': [left.node_id, right.node_id, internal.node_id]
             })
             step_count += 1
         
@@ -159,15 +178,34 @@ class HuffmanTree:
             self._generate_codes()
             
             # 记录最终状态
+            final_tree_data = self._get_tree_data(self.root)
             steps.append({
                 'step': step_count,
-                'description': '最终哈夫曼树',
-                'nodes': [],
-                'tree': self._get_tree_data(self.root),
-                'codes': self.codes
+                'description': '构建完成：生成哈夫曼编码',
+                'action': 'complete',
+                'queue_nodes': [],
+                'merged_nodes': [],
+                'current_tree': final_tree_data,
+                'all_trees': [final_tree_data],
+                'codes': self.codes,
+                'highlight_nodes': []
             })
         
         return steps
+    
+    def _get_node_display_name(self, node):
+        """获取节点的显示名称
+        
+        Args:
+            node: 哈夫曼树节点
+            
+        Returns:
+            str: 节点的显示名称
+        """
+        if node.char is not None:
+            return f"'{node.char}'"
+        else:
+            return "内部节点"
     
     def _clone_tree(self, node):
         """克隆树结构
@@ -201,24 +239,24 @@ class HuffmanTree:
         
         nodes = []
         links = []
-        node_map = {}  # 用于映射节点到ID
         
         # 使用层序遍历构建节点和链接数据
-        queue = deque([(root, 0, None)])  # (节点, ID, 父节点ID)
-        node_id = 0
+        queue = deque([(root, None)])  # (节点, 父节点ID)
         
         while queue:
-            node, current_id, parent_id = queue.popleft()
+            node, parent_id = queue.popleft()
+            
+            # 使用节点的 node_id 属性，如果没有则生成一个
+            current_id = getattr(node, 'node_id', id(node))
             
             # 添加节点
             nodes.append({
                 'id': current_id,
                 'char': node.char,
                 'freq': node.freq,
-                'parent_id': parent_id
+                'parent_id': parent_id,
+                'is_leaf': node.char is not None
             })
-            
-            node_map[node] = current_id
             
             # 如果有父节点，添加与父节点的链接
             if parent_id is not None:
@@ -229,14 +267,10 @@ class HuffmanTree:
             
             # 添加子节点到队列
             if node.left:
-                child_id = node_id + 1
-                node_id += 1
-                queue.append((node.left, child_id, current_id))
+                queue.append((node.left, current_id))
             
             if node.right:
-                child_id = node_id + 1
-                node_id += 1
-                queue.append((node.right, child_id, current_id))
+                queue.append((node.right, current_id))
         
         return {
             'nodes': nodes,
