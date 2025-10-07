@@ -25,6 +25,9 @@ class LinearView(QWidget):
             title: 对话框标题
             message: 消息内容
         """
+        # 在控制台输出错误信息
+        print(f"[{title}] {message}")
+        # 显示弹窗
         QMessageBox.information(self, title, message)
         
     def update_view(self, structure):

@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
         
         支持的数据结构：
         - 线性结构：顺序表、链表、栈
-        - 树形结构：二叉树、二叉搜索树、哈夫曼树
+        - 树形结构：二叉树、二叉搜索树、平衡二叉树(AVL树)、哈夫曼树
         """
         
         QMessageBox.about(self, "关于", about_text)

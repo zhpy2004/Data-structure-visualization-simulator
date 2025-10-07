@@ -27,11 +27,11 @@ class TreeView(QWidget):
             structure: 要显示的数据结构
         """
         print(f"更新树形视图: 类型={type(structure).__name__}")
-        if hasattr(self, 'visualization_area'):
-            self.visualization_area.structure = structure
-            self.visualization_area.update()
+        if hasattr(self, 'canvas'):
+            self.canvas.structure = structure
+            self.canvas.update()
         else:
-            print("警告: visualization_area不存在")
+            print("警告: canvas不存在")
     
     def show_message(self, title, message):
         """显示消息对话框
@@ -40,6 +40,9 @@ class TreeView(QWidget):
             title: 对话框标题
             message: 消息内容
         """
+        # 在控制台输出错误信息
+        print(f"[{title}] {message}")
+        # 显示弹窗
         QMessageBox.information(self, title, message)
         
     def highlight_huffman_codes(self, text, codes):
@@ -120,6 +123,11 @@ class TreeView(QWidget):
         self.huffman_build_steps = []
         self.current_build_step = 0
         
+        # 初始化AVL动画相关属性
+        self.avl_animation_timer = QTimer()
+        self.avl_build_steps = []
+        self.current_avl_step = 0
+        
         # 初始化UI
         self._init_ui()
         
@@ -141,6 +149,7 @@ class TreeView(QWidget):
         self.structure_combo = QComboBox()
         self.structure_combo.addItem("二叉树", "binary_tree")
         self.structure_combo.addItem("二叉搜索树", "bst")
+        self.structure_combo.addItem("平衡二叉树(AVL树)", "avl_tree")
         self.structure_combo.addItem("哈夫曼树", "huffman_tree")
         structure_layout.addWidget(self.structure_combo)
         
@@ -301,6 +310,9 @@ class TreeView(QWidget):
         
         # 连接哈夫曼动画定时器
         self.huffman_animation_timer.timeout.connect(self._animate_huffman_build)
+        
+        # 连接AVL动画定时器
+        self.avl_animation_timer.timeout.connect(self._animate_avl_build)
     
     def _structure_changed(self, index):
         """数据结构类型改变处理
@@ -347,6 +359,17 @@ class TreeView(QWidget):
             self.decode_button.hide()
             # 隐藏遍历方式选择框
             self.traversal_box.hide()
+        elif self.current_structure == "avl_tree":
+            # AVL树页面显示所有基本操作按钮
+            self.insert_button.show()
+            self.remove_button.show()
+            self.search_button.show()
+            self.traverse_button.show()
+            # 隐藏哈夫曼树特有操作按钮
+            self.encode_button.hide()
+            self.decode_button.hide()
+            # 显示遍历方式选择框
+            self.traversal_box.show()
         
         # 发射操作信号
         self.operation_triggered.emit("change_structure", {"structure_type": self.current_structure})
@@ -403,6 +426,14 @@ class TreeView(QWidget):
                 })
                 # 然后开始哈夫曼树构建动画
                 self.start_huffman_build_animation()
+            # 如果是AVL树，自动开始构建动画
+            elif self.current_structure == "avl_tree":
+                # 先触发构建动画信号，生成构建步骤
+                self.operation_triggered.emit("build_avl", {
+                    "values": values
+                })
+                # 然后开始AVL树构建动画
+                self.start_avl_build_animation()
             
             # 更新状态
             self.status_label.setText(f"已创建{self.structure_combo.currentText()}")
@@ -416,6 +447,32 @@ class TreeView(QWidget):
         self.operation_triggered.emit("clear", {
             "structure_type": self.current_structure
         })
+        
+        # 清除所有动画步骤数据
+        if hasattr(self, 'avl_build_steps'):
+            self.avl_build_steps = []
+        if hasattr(self, 'huffman_build_steps'):
+            self.huffman_build_steps = []
+        if hasattr(self, 'avl_delete_steps'):
+            self.avl_delete_steps = []
+        if hasattr(self, 'traversal_order'):
+            self.traversal_order = []
+        
+        # 重置动画步骤索引
+        self.current_avl_step = -1
+        self.current_huffman_step = -1
+        self.current_avl_delete_step = -1
+        self.current_traversal_index = -1
+        
+        # 禁用动画控制按钮
+        if hasattr(self, 'prev_step_button'):
+            self.prev_step_button.setEnabled(False)
+        if hasattr(self, 'next_step_button'):
+            self.next_step_button.setEnabled(False)
+        
+        # 停止任何正在运行的动画定时器
+        if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
+            self.animation_timer.stop()
         
         # 更新状态
         self.status_label.setText(f"已清空{self.structure_combo.currentText()}")
@@ -575,6 +632,9 @@ class TreeView(QWidget):
             data: 可视化数据
             structure_type: 结构类型
         """
+        # 调试信息
+        print(f"普通更新: structure_type={structure_type}, 节点数={len(data.get('nodes', []))}")
+        
         # 更新画布数据
         self.canvas.update_data(data)
         
@@ -594,6 +654,9 @@ class TreeView(QWidget):
             operation_type: 操作类型
             value: 操作的值
         """
+        # 调试信息
+        print(f"动画更新: 操作={operation_type}, 值={value}, after_state节点数={len(after_state.get('nodes', []))}")
+        
         # 更新画布数据（直接使用操作后的状态）
         self.canvas.update_data(after_state)
         
@@ -866,6 +929,54 @@ class TreeView(QWidget):
         # 开始动画
         self.start_huffman_build_animation()
     
+    def show_avl_build_animation(self, build_steps, inserted_value=None):
+        """显示AVL树构建过程的动画
+        
+        Args:
+            build_steps: 构建过程中的每一步状态
+            inserted_value: 插入的值，用于在动画完成后显示弹窗（仅用于单个插入操作）
+        """
+        if not build_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        self.stop_avl_animation()
+        
+        # 设置构建步骤数据
+        self.avl_build_steps = build_steps
+        self.current_avl_step = 0
+        self.inserted_value = inserted_value  # 保存插入的值
+        
+        # 更新状态标签
+        self.status_label.setText(f"AVL树构建动画开始，共{len(build_steps)}步")
+        
+        # 开始动画
+        self.start_avl_build_animation()
+
+    def show_avl_delete_animation(self, delete_steps, deleted_value=None):
+        """显示AVL树删除过程的动画
+        
+        Args:
+            delete_steps: 删除过程中的每一步状态
+            deleted_value: 被删除的值，用于在动画完成后显示弹窗
+        """
+        if not delete_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        self.stop_avl_animation()
+        
+        # 设置删除步骤数据
+        self.avl_delete_steps = delete_steps
+        self.current_avl_step = 0
+        self.deleted_value = deleted_value  # 保存删除的值
+        
+        # 更新状态标签
+        self.status_label.setText(f"AVL树删除动画开始，共{len(delete_steps)}步")
+        
+        # 开始动画
+        self.start_avl_delete_animation()
+ 
     def show_result(self, operation, result):
         """显示操作结果
         
@@ -953,10 +1064,16 @@ class TreeView(QWidget):
     
     def _prev_step(self):
         """通用的上一步方法，根据当前动画类型调用相应的方法"""
-        # 优先检查哈夫曼树构建动画
-        if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+        # 优先检查AVL树删除动画
+        if hasattr(self, 'avl_delete_steps') and self.avl_delete_steps:
+            self._prev_avl_delete_step()
+        # 然后检查AVL树构建动画
+        elif hasattr(self, 'avl_build_steps') and self.avl_build_steps:
+            self._prev_avl_step()
+        # 然后检查哈夫曼树构建动画
+        elif hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
             self._prev_huffman_step()
-        # 然后检查遍历和搜索动画
+        # 最后检查遍历和搜索动画
         elif hasattr(self.canvas, 'traversal_order') and hasattr(self.canvas, 'traversal_type'):
             self._prev_traversal_step()
         elif hasattr(self.canvas, 'search_target'):
@@ -964,10 +1081,16 @@ class TreeView(QWidget):
 
     def _next_step(self):
         """通用的下一步方法，根据当前动画类型调用相应的方法"""
-        # 优先检查哈夫曼树构建动画
-        if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+        # 优先检查AVL树删除动画
+        if hasattr(self, 'avl_delete_steps') and self.avl_delete_steps:
+            self._next_avl_delete_step()
+        # 然后检查AVL树构建动画
+        elif hasattr(self, 'avl_build_steps') and self.avl_build_steps:
+            self._next_avl_step()
+        # 然后检查哈夫曼树构建动画
+        elif hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
             self._next_huffman_step()
-        # 然后检查遍历和搜索动画
+        # 最后检查遍历和搜索动画
         elif hasattr(self.canvas, 'traversal_order') and hasattr(self.canvas, 'traversal_type'):
             self._next_traversal_step()
         elif hasattr(self.canvas, 'search_target'):
@@ -1012,6 +1135,98 @@ class TreeView(QWidget):
         else:
             # 已经是最后一步，显示最终结果
             self.status_label.setText("哈夫曼树构建完成")
+    
+    def _prev_avl_step(self):
+        """显示AVL树构建的上一步"""
+        if not self.avl_build_steps:
+            return
+            
+        # 移动到上一步
+        if self.current_avl_step > 0:
+            self.current_avl_step -= 1
+            self._show_avl_step(self.current_avl_step)
+            
+            # 更新按钮状态
+            self.next_step_button.setEnabled(True)
+            if self.current_avl_step == 0:
+                self.prev_step_button.setEnabled(False)
+                
+            self.status_label.setText(f"AVL树构建步骤 {self.current_avl_step + 1}/{len(self.avl_build_steps)}")
+    
+    def _prev_avl_delete_step(self):
+        """显示AVL树删除的上一步"""
+        if not self.avl_delete_steps:
+            return
+            
+        # 移动到上一步
+        if self.current_avl_step > 0:
+            self.current_avl_step -= 1
+            self._show_avl_delete_step(self.current_avl_step)
+            
+            # 更新按钮状态
+            self.next_step_button.setEnabled(True)
+            if self.current_avl_step == 0:
+                self.prev_step_button.setEnabled(False)
+                
+            self.status_label.setText(f"AVL树删除步骤 {self.current_avl_step + 1}/{len(self.avl_delete_steps)}")
+    
+    def _next_avl_step(self):
+        """显示AVL树构建的下一步"""
+        if not self.avl_build_steps:
+            return
+            
+        # 移动到下一步
+        if self.current_avl_step < len(self.avl_build_steps) - 1:
+            self.current_avl_step += 1
+            self._show_avl_step(self.current_avl_step)
+            
+            # 更新按钮状态
+            self.prev_step_button.setEnabled(True)
+            
+            # 检查是否到达最后一步
+            if self.current_avl_step == len(self.avl_build_steps) - 1:
+                self.next_step_button.setEnabled(False)
+                self.status_label.setText("AVL树构建完成")
+                
+                # 在动画完成时显示插入成功弹窗（仅用于单个插入操作）
+                if hasattr(self, 'inserted_value') and self.inserted_value is not None:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(self, "成功", f"成功插入节点 {self.inserted_value}")
+                    self.inserted_value = None  # 清除保存的值
+            else:
+                self.status_label.setText(f"AVL树构建步骤 {self.current_avl_step + 1}/{len(self.avl_build_steps)}")
+        else:
+            # 已经是最后一步，显示最终结果
+            self.status_label.setText("AVL树构建完成")
+    
+    def _next_avl_delete_step(self):
+        """显示AVL树删除的下一步"""
+        if not self.avl_delete_steps:
+            return
+            
+        # 移动到下一步
+        if self.current_avl_step < len(self.avl_delete_steps) - 1:
+            self.current_avl_step += 1
+            self._show_avl_delete_step(self.current_avl_step)
+            
+            # 更新按钮状态
+            self.prev_step_button.setEnabled(True)
+            
+            # 检查是否到达最后一步
+            if self.current_avl_step == len(self.avl_delete_steps) - 1:
+                self.next_step_button.setEnabled(False)
+                self.status_label.setText("AVL树删除完成")
+                
+                # 在动画完成时显示删除成功弹窗
+                if hasattr(self, 'deleted_value') and self.deleted_value is not None:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(self, "成功", f"成功删除节点 {self.deleted_value}")
+                    self.deleted_value = None  # 清除保存的值
+            else:
+                self.status_label.setText(f"AVL树删除步骤 {self.current_avl_step + 1}/{len(self.avl_delete_steps)}")
+        else:
+            # 已经是最后一步，显示最终结果
+            self.status_label.setText("AVL树删除完成")
     
     def _change_animation_speed(self):
         """改变动画播放速度"""
@@ -1074,6 +1289,27 @@ class TreeView(QWidget):
         
         # 显示当前步骤
         self._show_huffman_step(self.current_build_step)
+    
+    def _animate_avl_build(self):
+        """AVL树构建动画处理函数"""
+        if not self.avl_build_steps:
+            self.avl_animation_timer.stop()
+            return
+        
+        # 移动到下一步
+        self.current_avl_step += 1
+        
+        # 检查是否完成动画
+        if self.current_avl_step >= len(self.avl_build_steps):
+            # 动画完成，停止定时器
+            self.avl_animation_timer.stop()
+            self.status_label.setText("AVL树构建动画完成")
+            return
+        
+        # 显示当前步骤
+        self._show_avl_step(self.current_avl_step)
+    
+
     
     def _show_huffman_step(self, step_index):
         """显示哈夫曼树构建的特定步骤"""
@@ -1162,6 +1398,90 @@ class TreeView(QWidget):
         # 更新画布数据
         self.canvas.update_data(visualization_data)
     
+    def _show_avl_delete_step(self, step_index):
+        """显示AVL树删除的特定步骤"""
+        if step_index >= len(self.avl_delete_steps):
+            return
+        
+        step_data = self.avl_delete_steps[step_index]
+        
+        # 更新状态标签
+        description = step_data.get('description', f'步骤 {step_index + 1}')
+        self.status_label.setText(f"步骤 {step_index + 1}/{len(self.avl_delete_steps)}: {description}")
+        
+        # 准备可视化数据
+        visualization_data = {
+            'type': 'avl_tree',
+            'nodes': [],
+            'highlighted': step_data.get('highlight_nodes', [])
+        }
+        
+        # 根据步骤类型显示不同内容
+        action = step_data.get('action', 'unknown')
+        
+        if action == 'initialize':
+            # 初始化步骤：显示删除前的树状态
+            tree_data = step_data.get('current_tree')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        elif action == 'delete':
+            # 删除步骤：显示当前树状态
+            tree_data = step_data.get('current_tree')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        elif action == 'rotate':
+            # 旋转步骤：显示旋转后的树状态
+            tree_data = step_data.get('current_tree')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        elif action == 'complete':
+            # 完成步骤：显示最终的AVL树
+            tree_data = step_data.get('current_tree')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        # 更新画布数据
+        self.canvas.update_data(visualization_data)
+    
     def _calculate_node_level(self, node, all_nodes):
         """计算节点的层级"""
         if node.get('parent_id') is None:
@@ -1207,6 +1527,217 @@ class TreeView(QWidget):
             sibling_index = next((i for i, s in enumerate(siblings) if s['id'] == node['id']), 0)
             offset = (sibling_index / (len(siblings) - 1) - 0.5) * 0.4
             return parent_x + offset
+
+    def start_avl_build_animation(self):
+        """开始AVL树构建动画"""
+        if not hasattr(self, 'avl_build_steps') or not self.avl_build_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        if hasattr(self, 'avl_animation_timer') and self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        
+        # 初始化动画状态
+        self.current_avl_step = 0
+        
+        # 显示第一步
+        self._show_avl_step(0)
+        
+        # 启用上一步/下一步按钮
+        if hasattr(self, 'prev_step_button'):
+            self.prev_step_button.setEnabled(False)  # 第一步不能再往前
+        if hasattr(self, 'next_step_button'):
+            self.next_step_button.setEnabled(True)
+        
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"AVL树构建步骤 1/{len(self.avl_build_steps)}")
+    
+    def start_avl_delete_animation(self):
+        """开始AVL树删除动画"""
+        if not hasattr(self, 'avl_delete_steps') or not self.avl_delete_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        if hasattr(self, 'avl_animation_timer') and self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        
+        # 初始化动画状态
+        self.current_avl_step = 0
+        
+        # 显示第一步
+        self._show_avl_delete_step(0)
+        
+        # 启用上一步/下一步按钮
+        if hasattr(self, 'prev_step_button'):
+            self.prev_step_button.setEnabled(False)  # 第一步不能再往前
+        if hasattr(self, 'next_step_button'):
+            self.next_step_button.setEnabled(True)
+        
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"AVL树删除步骤 1/{len(self.avl_delete_steps)}")
+
+
+    def _show_avl_step(self, step_index):
+        """显示AVL树构建的特定步骤"""
+        import traceback
+        print(f"\n=== _show_avl_step 被调用 ===")
+        print(f"步骤索引: {step_index}")
+        print("调用栈:")
+        for line in traceback.format_stack()[-3:-1]:  # 显示最近的2层调用
+            print(f"  {line.strip()}")
+        print("========================\n")
+        
+        if not hasattr(self, 'avl_build_steps') or step_index >= len(self.avl_build_steps):
+            return
+        
+        step_data = self.avl_build_steps[step_index]
+        
+        # 调试信息：显示步骤详情
+        print(f"AVL插入动画 - 步骤 {step_index}: action={step_data.get('action')}, description={step_data.get('description')}")
+        if step_data.get('current_tree') and step_data.get('current_tree').get('nodes'):
+            node_count = len(step_data.get('current_tree').get('nodes'))
+            print(f"  树状态: {node_count}个节点")
+        else:
+            print(f"  树状态: 空树")
+        
+        # 更新状态标签
+        description = step_data.get('description', f'步骤 {step_index + 1}')
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"步骤 {step_index + 1}/{len(self.avl_build_steps)}: {description}")
+        
+        # 准备可视化数据
+        visualization_data = {
+            'type': 'avl_tree',
+            'nodes': [],
+            'highlighted': step_data.get('highlight_nodes', [])
+        }
+        
+        # 根据步骤类型显示不同内容
+        action = step_data.get('action', 'unknown')
+        
+        if action in ['initialize', 'insert', 'rotate', 'complete']:
+            # 显示树状态
+            tree_data = step_data.get('current_tree') or step_data.get('tree_data')
+            
+            # 调试信息：检查tree_data内容
+            print(f"  tree_data: {tree_data}")
+            if tree_data:
+                print(f"  tree_data.keys(): {tree_data.keys()}")
+                if 'nodes' in tree_data:
+                    print(f"  nodes数量: {len(tree_data['nodes'])}")
+            
+            if tree_data and tree_data.get('nodes'):
+                nodes = tree_data['nodes']
+                
+                # 计算每个节点的层级和位置
+                self._calculate_avl_node_positions(nodes)
+                
+                for node in nodes:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node.get('value', node.get('data', ''))),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+            
+            # 检查是否有待插入节点（仅在初始化步骤显示）
+            if action == 'initialize' and step_data.get('pending_node'):
+                pending_node = step_data['pending_node']
+                print(f"  添加待插入节点: {pending_node}")
+                visualization_data['nodes'].append({
+                    'id': pending_node['id'],
+                    'value': str(pending_node['value']),
+                    'level': pending_node.get('level', 0),
+                    'x_pos': pending_node.get('x_pos', 0.85),
+                    'parent_id': pending_node.get('parent_id'),
+                    'is_pending': True  # 标记为待插入节点
+                })
+        
+        # 更新画布数据
+        if hasattr(self, 'canvas'):
+            self.canvas.update_data(visualization_data)
+
+    def _calculate_avl_node_positions(self, nodes):
+        """计算AVL树节点的层级和水平位置
+        
+        Args:
+            nodes: 节点列表
+        """
+        if not nodes:
+            return
+        
+        # 构建节点ID到节点的映射
+        node_map = {node['id']: node for node in nodes}
+        
+        # 构建父子关系映射
+        children_map = {}
+        for node in nodes:
+            parent_id = node.get('parent_id')
+            if parent_id is not None:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(node['id'])
+        
+        # 找出根节点
+        root_nodes = [node for node in nodes if node.get('parent_id') is None]
+        if not root_nodes:
+            return
+        
+        root_node = root_nodes[0]
+        
+        # 计算每个节点的层级
+        def calculate_level(node_id, level=0):
+            node = node_map[node_id]
+            node['level'] = level
+            
+            # 递归计算子节点层级
+            if node_id in children_map:
+                for child_id in children_map[node_id]:
+                    calculate_level(child_id, level + 1)
+        
+        calculate_level(root_node['id'])
+        
+        # 计算每个节点的水平位置
+        def calculate_x_position(node_id, left=0.0, right=1.0):
+            node = node_map[node_id]
+            
+            # 当前节点位置在区间中间
+            node['x_pos'] = (left + right) / 2
+            
+            # 如果有子节点，递归计算子节点位置
+            if node_id in children_map:
+                children = children_map[node_id]
+                if len(children) == 1:
+                    # 只有一个子节点，放在父节点正下方
+                    calculate_x_position(children[0], left, right)
+                elif len(children) == 2:
+                    # 有两个子节点，分别放在左右
+                    mid = (left + right) / 2
+                    calculate_x_position(children[0], left, mid)  # 左子节点
+                    calculate_x_position(children[1], mid, right)  # 右子节点
+        
+        calculate_x_position(root_node['id'])
+    
+
+
+    def stop_avl_animation(self):
+        """停止所有AVL树动画（构建和删除）"""
+        # 停止构建动画定时器
+        if hasattr(self, 'avl_animation_timer') and self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        
+        # 重置动画状态
+        if hasattr(self, 'current_avl_step'):
+            self.current_avl_step = 0
+            
+        # 清除动画数据
+        if hasattr(self, 'avl_build_steps'):
+            self.avl_build_steps = []
+        if hasattr(self, 'avl_delete_steps'):
+            self.avl_delete_steps = []
 
 
 class TreeCanvas(QWidget):
@@ -1289,132 +1820,102 @@ class TreeCanvas(QWidget):
         self.highlighted_nodes = []
     
     def update_data(self, data):
-        """更新数据
+        """更新画布数据
         
         Args:
             data: 可视化数据，包含结构类型和节点
         """
-        # 停止任何正在进行的动画
-        self.stop_animation()
+        # 添加调用栈追踪
+        import traceback
+        stack = traceback.extract_stack()
+        print(f"=== TreeCanvas.update_data 调用栈追踪 ===")
+        print(f"调用者: {stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}")
+        print(f"上级调用者: {stack[-3].filename}:{stack[-3].lineno} in {stack[-3].name}")
+        
+        # 调试信息：打印传入的原始数据
+        print(f"画布update_data接收到的数据: {data}")
+        print(f"数据类型: {type(data)}")
+        if isinstance(data, dict):
+            print(f"数据键: {list(data.keys())}")
+            if 'nodes' in data:
+                print(f"nodes数量: {len(data['nodes'])}")
         
         # 更新数据
-        nodes = data.get("nodes", [])
+        self.data = data.get("nodes", [])
         self.structure_type = data.get("type")
         self.highlighted_nodes = data.get("highlighted", [])
         
-        # 重置画布尺寸计算变量
-        self.max_width = 0
-        self.max_height = 0
+        # 如果是AVL树，需要计算节点位置
+        if self.structure_type == "avl_tree" and self.data:
+            self._calculate_avl_node_positions(self.data)
         
         # 打印调试信息
-        print(f"更新树数据: 类型={self.structure_type}, 节点数量={len(nodes)}")
+        print(f"更新树数据: 类型={self.structure_type}, 节点数量={len(self.data)}")
         
-        # 处理不同格式的节点数据，确保每个节点都有level和x_pos字段
-        processed_nodes = []
-        for i, node in enumerate(nodes):
-            processed_node = node.copy()
-            
-            # 确保节点有value字段
-            if "value" not in processed_node:
-                if "data" in processed_node:
-                    processed_node["value"] = processed_node["data"]
-                elif "char" in processed_node:
-                    # 哈夫曼树节点可能有char和freq
-                    char = processed_node["char"]
-                    freq = processed_node.get("freq", 0)
-                    if char is not None:
-                        processed_node["value"] = f"{char}:{freq}"
-                    else:
-                        processed_node["value"] = f"内部节点:{freq}"
-            
-            # 如果没有level字段，根据父节点关系计算level
-            if "level" not in processed_node:
-                # 默认根节点level为0
-                if i == 0 or processed_node.get("parent_id") is None:
-                    processed_node["level"] = 0
-                else:
-                    # 查找父节点
-                    parent_id = processed_node.get("parent_id") or processed_node.get("parent")
-                    parent = next((n for n in processed_nodes if n["id"] == parent_id), None)
-                    if parent:
-                        processed_node["level"] = parent["level"] + 1
-                    else:
-                        # 如果找不到父节点，默认level为1
-                        processed_node["level"] = 1
-            
-            processed_nodes.append(processed_node)
-        
-        # 特殊处理二叉搜索树的节点位置
-        if self.structure_type == "bst":
-            # 为每个节点分配固定位置
-            # 这种方法不依赖于父子关系，而是根据节点值直接分配位置
-            
-            # 首先获取所有节点值并排序
-            node_values = []
-            for node in processed_nodes:
-                value = node.get("value")
-                try:
-                    value = float(value)
-                except (ValueError, TypeError):
-                    # 如果不能转换为数字，保持原样
-                    pass
-                node_values.append((value, node))
-            
-            # 按节点值排序
-            node_values.sort(key=lambda x: x[0])
-            
-            # 计算总节点数
-            total_nodes = len(node_values)
-            
-            # 为每个节点分配水平位置，从左到右均匀分布
-            for i, (_, node) in enumerate(node_values):
-                # 计算位置，范围从0.1到0.9
-                position = 0.1 + (0.8 * i / (total_nodes - 1 if total_nodes > 1 else 1))
-                node["x_pos"] = position
-        else:
-            # 处理其他类型的树
-            for processed_node in processed_nodes:
-                # 如果没有x_pos字段，根据节点在同一层的位置计算x_pos
-                if "x_pos" not in processed_node:
-                    # 获取节点ID和父节点ID
-                    node_id = processed_node.get("id")
-                    parent_id = processed_node.get("parent_id") or processed_node.get("parent")
-                    
-                    # 默认位置在中间
-                    if parent_id is None:
-                        # 根节点居中
-                        processed_node["x_pos"] = 0.5
-                    else:
-                        # 查找父节点
-                        parent = next((n for n in processed_nodes if n.get("id") == parent_id), None)
-                        if parent:
-                            parent_x_pos = parent.get("x_pos", 0.5)
-                            
-                            # 其他树：根据子节点顺序确定位置
-                            siblings = [n for n in nodes if (n.get("parent_id") == parent_id or n.get("parent") == parent_id)]
-                            sibling_count = len(siblings)
-                            
-                            if sibling_count > 1:
-                                # 找出当前节点在兄弟节点中的索引
-                                sibling_index = next((i for i, s in enumerate(siblings) if s.get("id") == node_id), 0)
-                                # 计算位置偏移
-                                offset = (sibling_index / (sibling_count - 1 or 1)) - 0.5
-                                processed_node["x_pos"] = parent_x_pos + offset * (0.5 / (processed_node.get("level", 1) or 1))
-                            else:
-                                # 如果只有一个子节点，放在父节点正下方
-                                processed_node["x_pos"] = parent_x_pos
-                        else:
-                            # 找不到父节点，默认位置在中间
-                            processed_node["x_pos"] = 0.5
-        
-        # 更新节点数据
-        self.data = processed_nodes
-        
-        # 触发重绘以显示更新的数据
+        # 触发重绘
         self.update()
+    
+    def _calculate_avl_node_positions(self, nodes):
+        """计算AVL树节点的层级和水平位置
         
-        # 强制处理事件以确保立即重绘
-        QApplication.processEvents()
+        Args:
+            nodes: 节点列表
+        """
+        if not nodes:
+            return
+        
+        # 构建节点ID到节点的映射
+        node_map = {node['id']: node for node in nodes}
+        
+        # 构建父子关系映射
+        children_map = {}
+        for node in nodes:
+            parent_id = node.get('parent_id')
+            if parent_id is not None:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(node['id'])
+        
+        # 找出根节点
+        root_nodes = [node for node in nodes if node.get('parent_id') is None]
+        if not root_nodes:
+            return
+        
+        root_node = root_nodes[0]
+        
+        # 计算每个节点的层级
+        def calculate_level(node_id, level=0):
+            node = node_map[node_id]
+            node['level'] = level
+            
+            # 递归计算子节点层级
+            if node_id in children_map:
+                for child_id in children_map[node_id]:
+                    calculate_level(child_id, level + 1)
+        
+        calculate_level(root_node['id'])
+        
+        # 计算每个节点的水平位置
+        def calculate_x_position(node_id, left=0.0, right=1.0):
+            node = node_map[node_id]
+            
+            # 当前节点位置在区间中间
+            node['x_pos'] = (left + right) / 2
+            
+            # 如果有子节点，递归计算子节点位置
+            if node_id in children_map:
+                children = children_map[node_id]
+                if len(children) == 1:
+                    # 只有一个子节点，放在父节点正下方
+                    calculate_x_position(children[0], left, right)
+                elif len(children) == 2:
+                    # 有两个子节点，分别放在左右
+                    mid = (left + right) / 2
+                    calculate_x_position(children[0], left, mid)  # 左子节点
+                    calculate_x_position(children[1], mid, right)  # 右子节点
+        
+        calculate_x_position(root_node['id'])
+
     
     def paintEvent(self, event):
         """绘制事件
@@ -1509,7 +2010,10 @@ class TreeCanvas(QWidget):
                 y = int(start_y + node.get("level", 0) * self.level_height)
                 
                 # 设置节点颜色
-                if node.get("id") in self.highlighted_nodes:
+                if node.get("is_pending"):
+                    # 待插入节点 - 使用虚线边框和半透明填充
+                    painter.setBrush(QBrush(QColor(255, 165, 0, 128)))  # 橙色半透明
+                elif node.get("id") in self.highlighted_nodes:
                     # 高亮节点
                     painter.setBrush(QBrush(QColor(255, 200, 0)))
                 else:
@@ -1530,7 +2034,13 @@ class TreeCanvas(QWidget):
                             painter.drawText(x + self.node_radius + 5, y - self.node_radius - 5, order_text)
                 
                 # 绘制节点圆
-                painter.setPen(QPen(Qt.black, 2))
+                if node.get("is_pending"):
+                    # 待插入节点使用虚线边框
+                    pen = QPen(QColor(255, 140, 0), 2)  # 橙色边框
+                    pen.setStyle(Qt.DashLine)  # 虚线样式
+                    painter.setPen(pen)
+                else:
+                    painter.setPen(QPen(Qt.black, 2))
                 painter.drawEllipse(x - self.node_radius, y - self.node_radius, 
                                   2 * self.node_radius, 2 * self.node_radius)
                 
@@ -1540,6 +2050,13 @@ class TreeCanvas(QWidget):
                 # 计算文本宽度，以便居中显示
                 text_width = painter.fontMetrics().width(value_text)
                 painter.drawText(x - text_width // 2, y + 5, value_text)
+                
+                # 如果是待插入节点，添加标签
+                if node.get("is_pending"):
+                    painter.setPen(QPen(QColor(255, 140, 0), 2))
+                    label_text = "待插入"
+                    label_width = painter.fontMetrics().width(label_text)
+                    painter.drawText(x - label_width // 2, y + self.node_radius + 20, label_text)
                 
                 # 如果是哈夫曼树，显示权重/频率
                 if self.structure_type == "huffman_tree" and "weight" in node:
@@ -1562,3 +2079,120 @@ class TreeCanvas(QWidget):
         except Exception as e:
             print(f"绘制节点时出错: {str(e)}")
             return
+    
+    def start_avl_build_animation(self):
+        """开始AVL树构建动画"""
+        if not self.avl_build_steps:
+            return
+        
+        # 停止任何正在进行的动画
+        if self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        
+        # 初始化动画状态
+        self.current_avl_step = 0
+        
+        # 显示第一步
+        self._show_avl_step(0)
+        
+        # 启用上一步/下一步按钮
+        self.prev_step_button.setEnabled(False)  # 第一步不能再往前
+        self.next_step_button.setEnabled(True)
+        
+        self.status_label.setText(f"AVL树构建步骤 1/{len(self.avl_build_steps)}")
+    
+    def stop_avl_animation(self):
+        """停止AVL树构建动画"""
+        if self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        
+        # 重置动画状态
+        self.current_avl_step = 0
+    
+    def _animate_avl_build(self):
+        """AVL树构建动画处理函数"""
+        if not self.avl_build_steps:
+            self.avl_animation_timer.stop()
+            return
+        
+        # 移动到下一步
+        self.current_avl_step += 1
+        
+        # 检查是否完成动画
+        if self.current_avl_step >= len(self.avl_build_steps):
+            # 动画完成，停止定时器
+            self.avl_animation_timer.stop()
+            self.status_label.setText("AVL树构建动画完成")
+            return
+        
+        # 显示当前步骤
+        self._show_avl_step(self.current_avl_step)
+    
+    def _show_avl_step(self, step_index):
+        """显示AVL树构建的特定步骤"""
+        if step_index >= len(self.avl_build_steps):
+            return
+        
+        step_data = self.avl_build_steps[step_index]
+        
+        # 更新状态标签
+        description = step_data.get('description', f'步骤 {step_index + 1}')
+        self.status_label.setText(f"步骤 {step_index + 1}/{len(self.avl_build_steps)}: {description}")
+        
+        # 准备可视化数据
+        visualization_data = {
+            'type': 'avl_tree',
+            'nodes': [],
+            'highlighted': step_data.get('highlight_nodes', [])
+        }
+        
+        # 根据步骤类型显示不同内容
+        action = step_data.get('action', 'unknown')
+        
+        if action == 'insert':
+            # 插入步骤：显示当前树状态
+            tree_data = step_data.get('tree_data')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        elif action == 'rotate':
+            # 旋转步骤：显示旋转后的树状态
+            tree_data = step_data.get('tree_data')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        elif action == 'complete':
+            # 完成步骤：显示最终的AVL树
+            tree_data = step_data.get('tree_data')
+            if tree_data and tree_data.get('nodes'):
+                for node in tree_data['nodes']:
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': str(node['value']),
+                        'level': node.get('level', 0),
+                        'x_pos': node.get('x_pos', 0.5),
+                        'parent_id': node.get('parent_id'),
+                        'height': node.get('height', 0),
+                        'balance_factor': node.get('balance_factor', 0)
+                    })
+        
+        # 更新画布数据
+        self.canvas.update_data(visualization_data)

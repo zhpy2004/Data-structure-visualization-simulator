@@ -8,6 +8,7 @@
 from models.tree.binary_tree import BinaryTree
 from models.tree.bst import BST
 from models.tree.huffman_tree import HuffmanTree
+from models.tree.avl_tree import AVLTree
 from utils.dsl_parser import parse_tree_dsl
 
 
@@ -50,6 +51,9 @@ class TreeController:
         elif action_type == 'build_huffman':
             frequencies = params.get('frequencies') or params.get('values')
             self._build_huffman_tree(frequencies)
+        elif action_type == 'build_avl':
+            values = params.get('values')
+            self._build_avl_tree(values)
         elif action_type == 'encode':
             text = params.get('text')
             self._encode_text(text)
@@ -96,6 +100,9 @@ class TreeController:
         elif self.structure_type == 'huffman_tree':
             # 哈夫曼树保存原始频率数据
             data['frequency_data'] = self.current_structure.get_frequency_data()
+        elif self.structure_type == 'avl_tree':
+            # AVL树序列化为层序遍历数组
+            data['tree_data'] = self.current_structure.levelorder_traversal()
         
         return data
         
@@ -134,6 +141,10 @@ class TreeController:
             tree_data = data.get('tree_data')
             if tree_data:
                 self._create_structure(structure_type, tree_data)
+        elif structure_type == 'avl_tree':
+            tree_data = data.get('tree_data')
+            if tree_data:
+                self._create_structure(structure_type, tree_data)
         elif structure_type == 'huffman_tree':
             frequency_data = data.get('frequency_data')
             if frequency_data:
@@ -162,7 +173,7 @@ class TreeController:
         """创建树形结构
         
         Args:
-            structure_type: 结构类型，'binary_tree', 'bst', 或 'huffman_tree'
+            structure_type: 结构类型，'binary_tree', 'bst', 'huffman_tree', 或 'avl_tree'
             initial_data: 初始数据列表
         """
         if initial_data is None:
@@ -183,6 +194,10 @@ class TreeController:
             if initial_data:
                 self.current_structure.build(initial_data)
             # 如果没有初始数据，仅创建空的哈夫曼树结构，不进行构建
+        elif structure_type == 'avl_tree':
+            self.current_structure = AVLTree()
+            for item in initial_data:
+                self.current_structure.insert(item)
         else:
             self.view.show_message("错误", f"未知结构类型: {structure_type}")
             return
@@ -205,19 +220,44 @@ class TreeController:
             return
         
         try:
-            # 记录插入前的状态用于动画
-            before_state = self.current_structure.get_visualization_data()
-            
-            # 执行插入操作
-            self.current_structure.insert(value)
-            
-            # 记录插入后的状态用于动画
-            after_state = self.current_structure.get_visualization_data()
-            
-            # 更新视图，传入前后状态用于动画
-            self.view.update_visualization_with_animation(before_state, after_state, 'insert', value)
+            if self.structure_type == 'avl_tree':
+                # AVL树使用特殊的插入方法，生成动画步骤
+                build_steps = self.current_structure.insert_with_steps(value)
+                # 显示AVL树插入动画，弹窗将在动画完成后显示
+                self.view.show_avl_build_animation(build_steps, value)
+            else:
+                # 其他树类型使用标准插入方法
+                # 记录插入前的状态用于动画
+                before_state = self.current_structure.get_visualization_data()
+                
+                # 执行插入操作
+                self.current_structure.insert(value)
+                
+                # 记录插入后的状态用于动画
+                after_state = self.current_structure.get_visualization_data()
+                
+                # 更新视图，传入前后状态用于动画
+                self.view.update_visualization_with_animation(before_state, after_state, 'insert', value)
         except Exception as e:
             self.view.show_message("错误", f"插入失败: {str(e)}")
+    
+    def _get_tree_values(self, node):
+        """获取树中所有节点的值（中序遍历）
+        
+        Args:
+            node: 当前节点
+            
+        Returns:
+            list: 节点值列表
+        """
+        if node is None:
+            return []
+        
+        values = []
+        values.extend(self._get_tree_values(node.left))
+        values.append(node.data)
+        values.extend(self._get_tree_values(node.right))
+        return values
     
     def _delete_node(self, value):
         """删除节点
@@ -228,23 +268,45 @@ class TreeController:
         if self.current_structure is None:
             self.view.show_message("错误", "请先创建数据结构")
             return
-        
-        if self.structure_type not in ['bst']:
+
+        if self.structure_type not in ['bst', 'avl_tree']:
             self.view.show_message("错误", f"{self.structure_type}不支持删除操作")
             return
-        
+
         try:
-            # 记录删除前的状态用于动画
-            before_state = self.current_structure.get_visualization_data()
+            # 验证输入值
+            try:
+                value = int(value)
+            except (ValueError, TypeError):
+                self.view.show_message("错误", "请输入有效的整数值")
+                return
             
-            # 执行删除操作
-            self.current_structure.delete(value)
-            
-            # 记录删除后的状态用于动画
-            after_state = self.current_structure.get_visualization_data()
-            
-            # 更新视图，传入前后状态用于动画
-            self.view.update_visualization_with_animation(before_state, after_state, 'delete', value)
+            # 对于AVL树，使用删除动画
+            if self.structure_type == 'avl_tree':
+                # 使用delete_with_steps方法获取删除步骤
+                delete_steps = self.current_structure.delete_with_steps(value)
+                if delete_steps:
+                    # 显示删除动画，弹窗将在动画完成后显示
+                    self.view.show_avl_delete_animation(delete_steps, value)
+                else:
+                    self.view.show_message("提示", f"值 {value} 不存在，无法删除")
+            else:
+                # 对于BST，使用原有的删除方法
+                # 记录删除前的状态用于动画
+                before_state = self.current_structure.get_visualization_data()
+                
+                # 执行删除操作
+                success = self.current_structure.delete(value)
+                
+                if success:
+                    # 记录删除后的状态用于动画
+                    after_state = self.current_structure.get_visualization_data()
+                    
+                    # 更新视图，传入前后状态用于动画
+                    self.view.update_visualization_with_animation(before_state, after_state, 'delete', value)
+                else:
+                    self.view.show_message("提示", f"值 {value} 不存在，无法删除")
+                    
         except Exception as e:
             self.view.show_message("错误", f"删除失败: {str(e)}")
     
@@ -299,6 +361,29 @@ class TreeController:
             self.view.show_huffman_build_animation(build_steps)
         except Exception as e:
             self.view.show_message("错误", f"构建哈夫曼树失败: {str(e)}")
+    
+    def _build_avl_tree(self, values):
+        """构建AVL树
+        
+        Args:
+            values: 要插入的值列表
+        """
+        if not values:
+            self.view.show_message("错误", "请提供要插入的值")
+            return
+        
+        try:
+            # 创建AVL树
+            self.structure_type = 'avl_tree'
+            self.current_structure = AVLTree()
+            
+            # 记录构建过程中的每一步状态
+            build_steps = self.current_structure.build_with_steps(values)
+            
+            # 更新视图，显示AVL树构建过程的动画
+            self.view.show_avl_build_animation(build_steps)
+        except Exception as e:
+            self.view.show_message("错误", f"构建AVL树失败: {str(e)}")
     
     def _encode_text(self, text):
         """使用哈夫曼编码对文本进行编码
@@ -363,6 +448,7 @@ class TreeController:
         
         # 获取当前结构的可视化数据
         data = self.current_structure.get_visualization_data()
+        print(f"控制器调用get_visualization_data: 节点数={len(data.get('nodes', []))}")
         
         # 更新视图
         self.view.update_visualization(data, self.structure_type)
