@@ -171,8 +171,6 @@ class AppController:
             structure_type = structure_data.get('type')
             content = structure_data.get('content')
             
-            print(f"加载数据: tab_index={tab_index}, structure_type={structure_type}, content={content}")
-            
             if tab_index == 0:  # 线性结构
                 # 设置当前结构类型
                 self.linear_controller.structure_type = structure_type

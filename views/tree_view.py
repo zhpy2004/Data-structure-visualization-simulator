@@ -26,12 +26,12 @@ class TreeView(QWidget):
         Args:
             structure: 要显示的数据结构
         """
-        print(f"更新树形视图: 类型={type(structure).__name__}")
         if hasattr(self, 'canvas'):
             self.canvas.structure = structure
             self.canvas.update()
         else:
-            print("警告: canvas不存在")
+            # 如果canvas不存在，显示错误信息
+            self.show_message("错误", "画布组件未正确初始化")
     
     def show_message(self, title, message):
         """显示消息对话框
@@ -40,8 +40,6 @@ class TreeView(QWidget):
             title: 对话框标题
             message: 消息内容
         """
-        # 在控制台输出错误信息
-        print(f"[{title}] {message}")
         # 显示弹窗
         QMessageBox.information(self, title, message)
         
@@ -572,7 +570,6 @@ class TreeView(QWidget):
         # 确保遍历类型不为None
         if not traversal_type:
             traversal_type = "preorder"  # 如果仍然为None，使用默认值
-            print(f"警告：未识别的遍历ID: {traversal_id}，使用默认前序遍历")
         
         # 发射操作信号
         self.operation_triggered.emit("traverse", {
@@ -632,9 +629,6 @@ class TreeView(QWidget):
             data: 可视化数据
             structure_type: 结构类型
         """
-        # 调试信息
-        print(f"普通更新: structure_type={structure_type}, 节点数={len(data.get('nodes', []))}")
-        
         # 更新画布数据
         self.canvas.update_data(data)
         
@@ -654,9 +648,6 @@ class TreeView(QWidget):
             operation_type: 操作类型
             value: 操作的值
         """
-        # 调试信息
-        print(f"动画更新: 操作={operation_type}, 值={value}, after_state节点数={len(after_state.get('nodes', []))}")
-        
         # 更新画布数据（直接使用操作后的状态）
         self.canvas.update_data(after_state)
         
@@ -709,11 +700,7 @@ class TreeView(QWidget):
                     node_id = value_to_ids[value][value_counts[value]]
                     node_ids.append(node_id)
                     value_counts[value] += 1
-                    print(f"映射节点值 {value} 到ID {node_id}（第{value_counts[value]}个同值节点）")
-        
-        # 打印调试信息
-        print(f"开始搜索动画: 路径: {path}")
-        print(f"节点ID映射: {node_ids}")
+
         
         # 停止任何正在进行的动画
         self.canvas.stop_animation()
@@ -742,7 +729,7 @@ class TreeView(QWidget):
         if node_ids and len(node_ids) > 0:
             self.canvas.highlighted_nodes = [node_ids[0]]
             self.canvas.current_traversal_index = 0
-            print(f"初始高亮节点: {self.canvas.highlighted_nodes}")
+
             self.status_label.setText(f"搜索步骤: 1/{len(path)}")
             
             # 强制重绘画布
@@ -865,11 +852,6 @@ class TreeView(QWidget):
                     if not found_unused and value_to_ids[value]:
                         node_id = value_to_ids[value][0]
                         node_ids.append(node_id)
-                        print(f"映射节点值 {value} 到已使用的ID {node_id}（重用）")
-        
-        # 打印调试信息
-        print(f"开始遍历动画: {traverse_type}, 路径: {path}")
-        print(f"节点ID映射: {node_ids}")
         
         # 停止任何正在进行的动画
         self.canvas.stop_animation()
@@ -900,7 +882,7 @@ class TreeView(QWidget):
         if node_ids and len(node_ids) > 0:
             self.canvas.highlighted_nodes = [node_ids[0]]
             self.canvas.current_traversal_index = 0
-            print(f"初始高亮节点: {self.canvas.highlighted_nodes}")
+
             self.status_label.setText(f"{traversal_name}遍历步骤: 1/{len(path)}")
             
             # 强制重绘画布
@@ -1579,26 +1561,13 @@ class TreeView(QWidget):
 
     def _show_avl_step(self, step_index):
         """显示AVL树构建的特定步骤"""
-        import traceback
-        print(f"\n=== _show_avl_step 被调用 ===")
-        print(f"步骤索引: {step_index}")
-        print("调用栈:")
-        for line in traceback.format_stack()[-3:-1]:  # 显示最近的2层调用
-            print(f"  {line.strip()}")
-        print("========================\n")
         
         if not hasattr(self, 'avl_build_steps') or step_index >= len(self.avl_build_steps):
             return
         
         step_data = self.avl_build_steps[step_index]
         
-        # 调试信息：显示步骤详情
-        print(f"AVL插入动画 - 步骤 {step_index}: action={step_data.get('action')}, description={step_data.get('description')}")
-        if step_data.get('current_tree') and step_data.get('current_tree').get('nodes'):
-            node_count = len(step_data.get('current_tree').get('nodes'))
-            print(f"  树状态: {node_count}个节点")
-        else:
-            print(f"  树状态: 空树")
+
         
         # 更新状态标签
         description = step_data.get('description', f'步骤 {step_index + 1}')
@@ -1619,12 +1588,7 @@ class TreeView(QWidget):
             # 显示树状态
             tree_data = step_data.get('current_tree') or step_data.get('tree_data')
             
-            # 调试信息：检查tree_data内容
-            print(f"  tree_data: {tree_data}")
-            if tree_data:
-                print(f"  tree_data.keys(): {tree_data.keys()}")
-                if 'nodes' in tree_data:
-                    print(f"  nodes数量: {len(tree_data['nodes'])}")
+
             
             if tree_data and tree_data.get('nodes'):
                 nodes = tree_data['nodes']
@@ -1646,7 +1610,7 @@ class TreeView(QWidget):
             # 检查是否有待插入节点（仅在初始化步骤显示）
             if action == 'initialize' and step_data.get('pending_node'):
                 pending_node = step_data['pending_node']
-                print(f"  添加待插入节点: {pending_node}")
+
                 visualization_data['nodes'].append({
                     'id': pending_node['id'],
                     'value': str(pending_node['value']),
@@ -1773,7 +1737,6 @@ class TreeCanvas(QWidget):
         """遍历动画处理函数"""
         # 检查是否有遍历顺序
         if not self.traversal_order or not hasattr(self, 'node_id_map') or len(self.node_id_map) == 0:
-            print("动画终止: 没有遍历顺序或节点ID映射")
             self.animation_timer.stop()
             return
         
@@ -1783,7 +1746,6 @@ class TreeCanvas(QWidget):
         # 检查是否完成遍历
         if self.current_traversal_index >= len(self.traversal_order):
             # 遍历完成，停止定时器
-            print("遍历动画完成")
             self.animation_timer.stop()
             
             # 动画结束后显示遍历结果弹窗
@@ -1801,8 +1763,7 @@ class TreeCanvas(QWidget):
             current_node_id = self.node_id_map[self.current_traversal_index]
             self.highlighted_nodes = [current_node_id]
             
-            # 打印调试信息
-            print(f"动画: 高亮节点 {current_node_id}，遍历索引 {self.current_traversal_index}，值 {self.traversal_order[self.current_traversal_index]}")
+
             
             # 强制重绘画布
             self.update()
@@ -1825,21 +1786,7 @@ class TreeCanvas(QWidget):
         Args:
             data: 可视化数据，包含结构类型和节点
         """
-        # 添加调用栈追踪
-        import traceback
-        stack = traceback.extract_stack()
-        print(f"=== TreeCanvas.update_data 调用栈追踪 ===")
-        print(f"调用者: {stack[-2].filename}:{stack[-2].lineno} in {stack[-2].name}")
-        print(f"上级调用者: {stack[-3].filename}:{stack[-3].lineno} in {stack[-3].name}")
-        
-        # 调试信息：打印传入的原始数据
-        print(f"画布update_data接收到的数据: {data}")
-        print(f"数据类型: {type(data)}")
-        if isinstance(data, dict):
-            print(f"数据键: {list(data.keys())}")
-            if 'nodes' in data:
-                print(f"nodes数量: {len(data['nodes'])}")
-        
+
         # 更新数据
         self.data = data.get("nodes", [])
         self.structure_type = data.get("type")
@@ -1848,9 +1795,6 @@ class TreeCanvas(QWidget):
         # 如果是AVL树，需要计算节点位置
         if self.structure_type == "avl_tree" and self.data:
             self._calculate_avl_node_positions(self.data)
-        
-        # 打印调试信息
-        print(f"更新树数据: 类型={self.structure_type}, 节点数量={len(self.data)}")
         
         # 触发重绘
         self.update()
@@ -1936,8 +1880,7 @@ class TreeCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 打印调试信息
-        print(f"绘制树: 节点数量={len(self.data)}")
+
         
         self._draw_tree(painter)
     
@@ -1995,11 +1938,8 @@ class TreeCanvas(QWidget):
                         painter.setPen(QPen(Qt.black, 2))
                         painter.drawLine(parent_x, parent_y, node_x, node_y)
                         
-                        # 调试信息
-                        print(f"绘制边: 从节点{parent_id}到节点{node.get('id')}")
-
         except Exception as e:
-            print(f"绘制树时出错: {str(e)}")
+            # 绘制出错时静默处理
             return
         
         # 然后绘制节点
@@ -2077,7 +2017,8 @@ class TreeCanvas(QWidget):
                     code_width = painter.fontMetrics().width(code_text)
                     painter.drawText(x - code_width // 2, y - self.node_radius - 5, code_text)
         except Exception as e:
-            print(f"绘制节点时出错: {str(e)}")
+            # 绘制节点出错时静默处理
+            pass
             return
     
     def start_avl_build_animation(self):

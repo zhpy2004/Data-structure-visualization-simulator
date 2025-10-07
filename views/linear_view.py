@@ -25,8 +25,6 @@ class LinearView(QWidget):
             title: 对话框标题
             message: 消息内容
         """
-        # 在控制台输出错误信息
-        print(f"[{title}] {message}")
         # 显示弹窗
         QMessageBox.information(self, title, message)
         
@@ -40,7 +38,7 @@ class LinearView(QWidget):
         if hasattr(self, 'visualization_area'):
             self.visualization_area.structure = structure
             self.visualization_area.update()
-        print(f"更新数据: 类型={getattr(structure, '__class__.__name__', 'Unknown')}, 数据长度={getattr(structure, 'size', 0)}")
+
     
     def __init__(self):
         """初始化线性结构视图"""
@@ -424,8 +422,7 @@ class LinearCanvas(QWidget):
                 # 尝试其他可能的键
                 self.data = data.get("data", [])
         
-        # 打印调试信息
-        print(f"更新数据: 类型={self.structure_type}, 数据长度={len(self.data) if self.data else 0}")
+
         
         # 根据数据量调整画布大小
         self._adjust_canvas_size()
@@ -472,8 +469,7 @@ class LinearCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 打印调试信息
-        print(f"绘制线性结构: 类型={self.structure_type}, 数据长度={len(self.data)}")
+
         
         # 根据结构类型选择绘制方法
         if self.structure_type == "array_list":

@@ -218,12 +218,6 @@ class AVLTree:
             'rotation_info': None
         })
         
-        # 调试信息：显示生成的步骤
-        print(f"insert_with_steps生成了{len(steps)}个步骤:")
-        for i, step in enumerate(steps):
-            tree_nodes = step.get('current_tree', {}).get('nodes', []) if step.get('current_tree') else []
-            print(f"  步骤{i}: action={step.get('action')}, 节点数={len(tree_nodes)}, description={step.get('description')}")
-        
         return steps
     
     def _insert(self, node, value):
@@ -474,9 +468,6 @@ class AVLTree:
             }
             nodes.append(node_data)
             
-            # 调试信息
-            print(f"添加节点: ID={current_id}, 值={node.data}, 父节点ID={parent_id}")
-            
             # 如果有父节点，添加与父节点的链接
             if parent_id is not None:
                 links.append({
@@ -495,11 +486,6 @@ class AVLTree:
             'nodes': nodes,
             'links': links
         }
-        
-        # 调试信息
-        print(f"生成树数据: 节点数={len(nodes)}, 边数={len(links)}")
-        for node in nodes:
-            print(f"  节点: {node}")
         
         return result
     
@@ -777,11 +763,6 @@ class AVLTree:
             'size': self.size
         }
         
-        # 调试信息
-        print(f"get_visualization_data返回: 节点数={len(nodes)}, size={self.size}")
-        for node in nodes:
-            print(f"  可视化节点: ID={node['id']}, 值={node['value']}")
-        
         return result
     
     def delete(self, value):
@@ -900,7 +881,6 @@ class AVLTree:
             tree_data['type'] = 'avl_tree'
             tree_data['height'] = self.height()
             actual_node_count = len(tree_data['nodes']) if 'nodes' in tree_data else 0
-            print(f"调试信息: self.size={self.size}, 实际节点数={actual_node_count}")
             tree_data['size'] = actual_node_count  # 使用实际节点数而不是self.size
         
         return tree_data

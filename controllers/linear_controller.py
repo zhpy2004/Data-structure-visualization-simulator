@@ -80,31 +80,24 @@ class LinearController:
         """从保存的数据加载数据结构
         
         Args:
-            structure_type: 数据结构类型
-            data: 保存的数据
+            structure_type (str): 数据结构类型 ('array_list', 'linked_list', 'stack')
+            data (dict): 保存的数据，包含elements字段
         """
-        print(f"加载线性结构: 类型={structure_type}, 数据={data}")
-        
         # 设置结构类型
         self.structure_type = structure_type
         
-        # 然后加载数据
+        # 检查数据有效性
         if not data:
-            print("没有数据")
             return
             
         # 获取元素列表
         elements = data.get("elements", [])
-        print(f"加载元素: {elements}")
         
         # 创建指定类型的数据结构并加载元素
         self._create_structure(structure_type, elements)
         
-        print(f"加载完成，当前结构: {self.current_structure}")
-        
-        # 强制更新视图
+        # 更新视图显示
         if self.view:
-            print("更新视图")
             self.view.update_view(self.current_structure)
     
     def execute_dsl(self, command):

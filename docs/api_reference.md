@@ -58,6 +58,23 @@
 - `get_tree_data(self)` - 获取树的数据表示
 - `build_from_data(self, data)` - 从数据构建树
 
+#### AVLTree (AVL树)
+- `__init__(self)` - 初始化AVL树
+- `insert(self, value)` - 插入节点（自动平衡）
+- `remove(self, value)` - 删除节点（自动平衡）
+- `search(self, value)` - 搜索节点
+- `height(self, node)` - 获取节点高度
+- `balance_factor(self, node)` - 获取节点平衡因子
+- `left_rotate(self, node)` - 左旋操作
+- `right_rotate(self, node)` - 右旋操作
+- `preorder_traversal(self)` - 前序遍历
+- `inorder_traversal(self)` - 中序遍历
+- `postorder_traversal(self)` - 后序遍历
+- `levelorder_traversal(self)` - 层序遍历
+- `get_tree_data(self)` - 获取树的数据表示
+- `build_from_data(self, data)` - 从数据构建树
+- `get_build_steps(self, values)` - 获取构建步骤（用于动画）
+
 #### HuffmanTree (哈夫曼树)
 - `__init__(self)` - 初始化哈夫曼树
 - `build(self, frequencies)` - 构建哈夫曼树
@@ -100,6 +117,10 @@
 - `get_structure_data(self)` - 获取当前数据结构数据
 - `load_structure(self, structure_type, data)` - 加载数据结构
 - `_build_huffman_tree(self, frequencies)` - 构建哈夫曼树
+- `show_avl_build_animation(self, values)` - 显示AVL树构建动画
+- `_update_avl_animation(self)` - 更新AVL树动画
+- `_next_avl_step(self)` - AVL树动画下一步
+- `_prev_avl_step(self)` - AVL树动画上一步
 
 ## 视图 (Views)
 
@@ -126,6 +147,10 @@
 - `show_message(self, message)` - 显示消息
 - `show_animation(self, animation_data)` - 显示动画
 - `_structure_changed(self, index)` - 处理数据结构类型变更
+- `show_avl_build_animation(self, values)` - 显示AVL树构建动画
+- `_update_avl_animation(self)` - 更新AVL树动画显示
+- `_next_avl_step(self)` - AVL树动画下一步
+- `_prev_avl_step(self)` - AVL树动画上一步
 
 ## 工具类 (Utils)
 
@@ -139,3 +164,6 @@
 - `animate_traversal(self, steps, canvas)` - 动画展示遍历过程
 - `animate_search(self, steps, canvas)` - 动画展示搜索过程
 - `animate_huffman_build(self, steps, canvas)` - 动画展示哈夫曼树构建过程
+- `animate_avl_build(self, steps, canvas)` - 动画展示AVL树构建过程
+- `draw_avl_rotation(self, rotation_data, canvas)` - 绘制AVL树旋转操作
+- `show_balance_factors(self, tree_data, canvas)` - 显示节点平衡因子

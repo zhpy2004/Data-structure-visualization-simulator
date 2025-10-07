@@ -126,11 +126,11 @@ class TreeController:
         
         # 如果找到了对应的数据结构类型，切换到该类型
         if structure_index >= 0:
-            print(f"切换到数据结构类型: {structure_type}, 索引: {structure_index}")
             self.view.structure_combo.setCurrentIndex(structure_index)
             # 这会触发_structure_changed方法，更新UI和当前结构类型
         else:
-            print(f"未找到数据结构类型: {structure_type}")
+            # 如果未找到对应的数据结构类型，显示错误信息
+            self.view.show_message("错误", f"未找到数据结构类型: {structure_type}")
             
         # 根据不同的数据结构类型，加载数据
         if structure_type == 'binary_tree':
@@ -448,7 +448,6 @@ class TreeController:
         
         # 获取当前结构的可视化数据
         data = self.current_structure.get_visualization_data()
-        print(f"控制器调用get_visualization_data: 节点数={len(data.get('nodes', []))}")
         
         # 更新视图
         self.view.update_visualization(data, self.structure_type)
@@ -479,10 +478,8 @@ class TreeController:
         
         # 确保遍历类型有效
         if traverse_type is None:
-            print(f"警告：收到无效的遍历类型: 'None'，使用默认前序遍历")
             traverse_type = 'preorder'  # 设置默认值为前序遍历
         elif traverse_type.lower() not in ['preorder', 'inorder', 'postorder', 'levelorder']:
-            print(f"警告：收到无效的遍历类型: '{traverse_type}'，使用默认前序遍历")
             traverse_type = 'preorder'  # 设置默认值为前序遍历
         else:
             # 标准化遍历类型（转为小写）
