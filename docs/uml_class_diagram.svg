@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200">
+  <defs>
+    <style>
+      .class-box { fill: #f8f9fa; stroke: #333; stroke-width: 2; }
+      .interface-box { fill: #e3f2fd; stroke: #1976d2; stroke-width: 2; }
+      .abstract-box { fill: #fff3e0; stroke: #f57c00; stroke-width: 2; }
+      .title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; text-anchor: middle; }
+      .method { font-family: Arial, sans-serif; font-size: 11px; }
+      .attribute { font-family: Arial, sans-serif; font-size: 11px; }
+      .line { stroke: #333; stroke-width: 1.5; fill: none; }
+      .inheritance { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#triangle); }
+      .composition { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#diamond); }
+      .association { stroke: #333; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="triangle" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0,0 0,6 9,3" fill="#333"/>
+    </marker>
+    <marker id="diamond" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0,3 3,0 9,3 3,6" fill="#333"/>
+    </marker>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0,0 0,6 9,3" fill="none" stroke="#333"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="800" y="30" class="title" font-size="18">数据结构可视化模拟器 - UML类图</text>
+
+  <!-- Models Layer -->
+  <text x="800" y="70" class="title" font-size="16">模型层 (Models)</text>
+  
+  <!-- Linear Structures -->
+  <g id="linear-structures">
+    <text x="200" y="100" class="title" font-size="14">线性结构</text>
+    
+    <!-- ArrayList -->
+    <rect x="50" y="120" width="150" height="120" class="class-box"/>
+    <text x="125" y="140" class="title">ArrayList</text>
+    <line x1="50" y1="145" x2="200" y2="145" class="line"/>
+    <text x="55" y="160" class="attribute">- data: list</text>
+    <text x="55" y="175" class="attribute">- capacity: int</text>
+    <line x1="50" y1="180" x2="200" y2="180" class="line"/>
+    <text x="55" y="195" class="method">+ insert(index, value)</text>
+    <text x="55" y="210" class="method">+ remove(index)</text>
+    <text x="55" y="225" class="method">+ get(index)</text>
+
+    <!-- LinkedList -->
+    <rect x="220" y="120" width="150" height="140" class="class-box"/>
+    <text x="295" y="140" class="title">LinkedList</text>
+    <line x1="220" y1="145" x2="370" y2="145" class="line"/>
+    <text x="225" y="160" class="attribute">- head: Node</text>
+    <text x="225" y="175" class="attribute">- size: int</text>
+    <line x1="220" y1="180" x2="370" y2="180" class="line"/>
+    <text x="225" y="195" class="method">+ append(value)</text>
+    <text x="225" y="210" class="method">+ prepend(value)</text>
+    <text x="225" y="225" class="method">+ remove(value)</text>
+    <text x="225" y="240" class="method">+ find(value)</text>
+
+    <!-- Node -->
+    <rect x="240" y="280" width="110" height="80" class="class-box"/>
+    <text x="295" y="300" class="title">Node</text>
+    <line x1="240" y1="305" x2="350" y2="305" class="line"/>
+    <text x="245" y="320" class="attribute">+ data: any</text>
+    <text x="245" y="335" class="attribute">+ next: Node</text>
+
+    <!-- Stack -->
+    <rect x="390" y="120" width="150" height="120" class="class-box"/>
+    <text x="465" y="140" class="title">Stack</text>
+    <line x1="390" y1="145" x2="540" y2="145" class="line"/>
+    <text x="395" y="160" class="attribute">- data: list</text>
+    <text x="395" y="175" class="attribute">- capacity: int</text>
+    <line x1="390" y1="180" x2="540" y2="180" class="line"/>
+    <text x="395" y="195" class="method">+ push(value)</text>
+    <text x="395" y="210" class="method">+ pop()</text>
+    <text x="395" y="225" class="method">+ peek()</text>
+  </g>
+
+  <!-- Tree Structures -->
+  <g id="tree-structures">
+    <text x="900" y="100" class="title" font-size="14">树形结构</text>
+    
+    <!-- TreeNode -->
+    <rect x="800" y="120" width="120" height="100" class="class-box"/>
+    <text x="860" y="140" class="title">TreeNode</text>
+    <line x1="800" y1="145" x2="920" y2="145" class="line"/>
+    <text x="805" y="160" class="attribute">+ data: any</text>
+    <text x="805" y="175" class="attribute">+ left: TreeNode</text>
+    <text x="805" y="190" class="attribute">+ right: TreeNode</text>
+    <text x="805" y="205" class="attribute">+ height: int</text>
+
+    <!-- BinaryTree -->
+    <rect x="1250" y="120" width="150" height="140" class="class-box"/>
+    <text x="1325" y="140" class="title">BinaryTree</text>
+    <line x1="1250" y1="145" x2="1400" y2="145" class="line"/>
+    <text x="1255" y="160" class="attribute">- root: TreeNode</text>
+    <line x1="1250" y1="165" x2="1400" y2="165" class="line"/>
+    <text x="1255" y="180" class="method">+ insert(value)</text>
+    <text x="1255" y="195" class="method">+ remove(value)</text>
+    <text x="1255" y="210" class="method">+ search(value)</text>
+    <text x="1255" y="225" class="method">+ inorder()</text>
+    <text x="1255" y="240" class="method">+ preorder()</text>
+    <text x="1255" y="255" class="method">+ postorder()</text>
+
+    <!-- BST -->
+    <rect x="750" y="280" width="150" height="120" class="class-box"/>
+    <text x="825" y="300" class="title">BST</text>
+    <line x1="750" y1="305" x2="900" y2="305" class="line"/>
+    <line x1="750" y1="310" x2="900" y2="310" class="line"/>
+    <text x="755" y="325" class="method">+ insert(value)</text>
+    <text x="755" y="340" class="method">+ remove(value)</text>
+    <text x="755" y="355" class="method">+ search(value)</text>
+    <text x="755" y="370" class="method">+ find_min()</text>
+    <text x="755" y="385" class="method">+ find_max()</text>
+
+    <!-- AVLTree -->
+    <rect x="920" y="280" width="150" height="140" class="class-box"/>
+    <text x="995" y="300" class="title">AVLTree</text>
+    <line x1="920" y1="305" x2="1070" y2="305" class="line"/>
+    <line x1="920" y1="310" x2="1070" y2="310" class="line"/>
+    <text x="925" y="325" class="method">+ insert(value)</text>
+    <text x="925" y="340" class="method">+ remove(value)</text>
+    <text x="925" y="355" class="method">+ rotate_left()</text>
+    <text x="925" y="370" class="method">+ rotate_right()</text>
+    <text x="925" y="385" class="method">+ get_balance()</text>
+    <text x="925" y="400" class="method">+ update_height()</text>
+
+    <!-- HuffmanTree -->
+    <rect x="1090" y="280" width="150" height="120" class="class-box"/>
+    <text x="1165" y="300" class="title">HuffmanTree</text>
+    <line x1="1090" y1="305" x2="1240" y2="305" class="line"/>
+    <text x="1095" y="320" class="attribute">- frequency_map: dict</text>
+    <line x1="1090" y1="325" x2="1240" y2="325" class="line"/>
+    <text x="1095" y="340" class="method">+ build_tree(text)</text>
+    <text x="1095" y="355" class="method">+ encode(text)</text>
+    <text x="1095" y="370" class="method">+ decode(code)</text>
+    <text x="1095" y="385" class="method">+ get_codes()</text>
+  </g>
+
+  <!-- Controllers Layer -->
+  <text x="650" y="660" class="title" font-size="16">控制器层 (Controllers)</text>
+
+  <!-- AppController -->
+  <rect x="400" y="680" width="200" height="140" class="class-box"/>
+  <text x="500" y="700" class="title">AppController</text>
+  <line x1="400" y1="705" x2="600" y2="705" class="line"/>
+  <text x="405" y="720" class="attribute">- main_window: MainWindow</text>
+  <text x="405" y="735" class="attribute">- linear_controller: LinearController</text>
+  <text x="405" y="750" class="attribute">- tree_controller: TreeController</text>
+  <text x="405" y="765" class="attribute">- dsl_controller: DSLController</text>
+  <line x1="400" y1="770" x2="600" y2="770" class="line"/>
+  <text x="405" y="785" class="method">+ save_structure()</text>
+  <text x="405" y="800" class="method">+ load_structure()</text>
+  <text x="405" y="815" class="method">+ _connect_signals()</text>
+
+  <!-- LinearController -->
+  <rect x="50" y="680" width="180" height="120" class="class-box"/>
+  <text x="140" y="700" class="title">LinearController</text>
+  <line x1="50" y1="705" x2="230" y2="705" class="line"/>
+  <text x="55" y="720" class="attribute">- view: LinearView</text>
+  <text x="55" y="735" class="attribute">- current_structure: object</text>
+  <line x1="50" y1="740" x2="230" y2="740" class="line"/>
+  <text x="55" y="755" class="method">+ handle_action(type, params)</text>
+  <text x="55" y="770" class="method">+ create_structure(type, data)</text>
+  <text x="55" y="785" class="method">+ update_view()</text>
+
+  <!-- TreeController -->
+  <rect x="650" y="680" width="180" height="140" class="class-box"/>
+  <text x="740" y="700" class="title">TreeController</text>
+  <line x1="650" y1="705" x2="830" y2="705" class="line"/>
+  <text x="655" y="720" class="attribute">- view: TreeView</text>
+  <text x="655" y="735" class="attribute">- current_structure: object</text>
+  <line x1="650" y1="740" x2="830" y2="740" class="line"/>
+  <text x="655" y="755" class="method">+ handle_action(type, params)</text>
+  <text x="655" y="770" class="method">+ create_structure(type, data)</text>
+  <text x="655" y="785" class="method">+ show_avl_build_animation()</text>
+  <text x="655" y="800" class="method">+ update_view()</text>
+
+  <!-- DSLController -->
+  <rect x="870" y="560" width="180" height="120" class="class-box"/>
+  <text x="960" y="580" class="title">DSLController</text>
+  <line x1="870" y1="585" x2="1050" y2="585" class="line"/>
+  <text x="875" y="600" class="attribute">- linear_controller: LinearController</text>
+  <text x="875" y="615" class="attribute">- tree_controller: TreeController</text>
+  <line x1="870" y1="620" x2="1050" y2="620" class="line"/>
+  <text x="875" y="635" class="method">+ execute_command(command)</text>
+  <text x="875" y="650" class="method">+ parse_command(command)</text>
+  <text x="875" y="665" class="method">+ validate_syntax(command)</text>
+
+  <!-- Views Layer -->
+  <text x="400" y="1080" class="title" font-size="16">视图层 (Views)</text>
+
+  <!-- MainWindow -->
+  <rect x="300" y="900" width="200" height="140" class="class-box"/>
+  <text x="400" y="920" class="title">MainWindow</text>
+  <line x1="300" y1="925" x2="500" y2="925" class="line"/>
+  <text x="305" y="940" class="attribute">- linear_view: LinearView</text>
+  <text x="305" y="955" class="attribute">- tree_view: TreeView</text>
+  <text x="305" y="970" class="attribute">- dsl_input: QTextEdit</text>
+  <line x1="300" y1="975" x2="500" y2="975" class="line"/>
+  <text x="305" y="990" class="method">+ _init_ui()</text>
+  <text x="305" y="1005" class="method">+ _connect_signals()</text>
+  <text x="305" y="1020" class="method">+ show_message(title, msg)</text>
+
+  <!-- LinearView -->
+  <rect x="50" y="900" width="180" height="120" class="class-box"/>
+  <text x="140" y="920" class="title">LinearView</text>
+  <line x1="50" y1="925" x2="230" y2="925" class="line"/>
+  <text x="55" y="940" class="attribute">- visualization_area: QWidget</text>
+  <text x="55" y="955" class="attribute">- control_panel: QWidget</text>
+  <line x1="50" y1="960" x2="230" y2="960" class="line"/>
+  <text x="55" y="975" class="method">+ update_view(structure)</text>
+  <text x="55" y="990" class="method">+ show_message(title, msg)</text>
+  <text x="55" y="1005" class="method">+ clear_view()</text>
+
+  <!-- TreeView -->
+  <rect x="550" y="900" width="180" height="140" class="class-box"/>
+  <text x="640" y="920" class="title">TreeView</text>
+  <line x1="550" y1="925" x2="730" y2="925" class="line"/>
+  <text x="555" y="940" class="attribute">- visualization_area: QWidget</text>
+  <text x="555" y="955" class="attribute">- control_panel: QWidget</text>
+  <line x1="550" y1="960" x2="730" y2="960" class="line"/>
+  <text x="555" y="975" class="method">+ update_view(structure)</text>
+  <text x="555" y="990" class="method">+ show_avl_build_animation()</text>
+  <text x="555" y="1005" class="method">+ show_message(title, msg)</text>
+  <text x="555" y="1020" class="method">+ clear_view()</text>
+
+  <!-- Utils Layer -->
+  <text x="950" y="880" class="title" font-size="16">工具类 (Utils)</text>
+
+  <!-- DSLParser -->
+  <rect x="1020" y="900" width="180" height="120" class="class-box"/>
+  <text x="1110" y="920" class="title">DSLParser</text>
+  <line x1="1020" y1="925" x2="1200" y2="925" class="line"/>
+  <text x="1025" y="940" class="attribute">- linear_grammar: str</text>
+  <text x="1025" y="955" class="attribute">- tree_grammar: str</text>
+  <line x1="1020" y1="960" x2="1200" y2="960" class="line"/>
+  <text x="1025" y="975" class="method">+ parse_linear_dsl(command)</text>
+  <text x="1025" y="990" class="method">+ parse_tree_dsl(command)</text>
+  <text x="1025" y="1005" class="method">+ validate_syntax(command)</text>
+
+  <!-- VisualizationHelper -->
+  <rect x="800" y="900" width="180" height="140" class="class-box"/>
+  <text x="890" y="920" class="title">VisualizationHelper</text>
+  <line x1="800" y1="925" x2="980" y2="925" class="line"/>
+  <line x1="800" y1="930" x2="980" y2="930" class="line"/>
+  <text x="805" y="945" class="method">+ draw_tree(painter, tree)</text>
+  <text x="805" y="960" class="method">+ draw_linear(painter, structure)</text>
+  <text x="805" y="975" class="method">+ animate_traversal()</text>
+  <text x="805" y="990" class="method">+ animate_avl_build()</text>
+  <text x="805" y="1005" class="method">+ draw_avl_rotation()</text>
+  <text x="805" y="1020" class="method">+ show_balance_factors()</text>
+
+  <!-- Relationships -->
+  <!-- Linear structure relationships -->
+  <!-- LinkedList uses Node (composition) -->
+  <line x1="295" y1="260" x2="295" y2="280" class="composition"/>
+  <text x="300" y="270" class="method">uses</text>
+  
+  <!-- Inheritance relationships (Tree structures inherit from TreeNode) -->
+  <!-- BinaryTree inherits from TreeNode -->
+  <line x1="1325" y1="260" x2="920" y2="220" class="inheritance"/>
+  <text x="1120" y="240" class="method">extends</text>
+  
+  <!-- BST inherits from TreeNode -->
+  <line x1="825" y1="280" x2="860" y2="220" class="inheritance"/>
+  <text x="840" y="250" class="method">extends</text>
+  
+  <!-- AVLTree inherits from TreeNode -->
+  <line x1="995" y1="280" x2="860" y2="220" class="inheritance"/>
+  <text x="925" y="250" class="method">extends</text>
+  
+  <!-- HuffmanTree inherits from TreeNode -->
+  <line x1="1165" y1="280" x2="860" y2="220" class="inheritance"/>
+  <text x="1010" y="250" class="method">extends</text>
+  
+  <!-- Composition relationships (Controllers control Views) -->
+  <!-- LinearController controls LinearView -->
+  <line x1="140" y1="800" x2="140" y2="900" class="composition"/>
+  <text x="145" y="850" class="method">controls</text>
+  
+  <!-- TreeController controls TreeView -->
+  <line x1="740" y1="820" x2="640" y2="900" class="composition"/>
+  <text x="690" y="860" class="method">controls</text>
+  
+  <!-- Association relationships (AppController uses other controllers) -->
+  <!-- AppController uses LinearController -->
+  <line x1="400" y1="740" x2="230" y2="740" class="association"/>
+  <text x="315" y="735" class="method">uses</text>
+  
+  <!-- AppController uses TreeController -->
+  <line x1="600" y1="740" x2="650" y2="740" class="association"/>
+  <text x="620" y="735" class="method">uses</text>
+  
+  <!-- AppController uses DSLController -->
+  <line x1="600" y1="720" x2="870" y2="620" class="association"/>
+  <text x="735" y="665" class="method">uses</text>
+  
+  <!-- MainWindow contains Views -->
+  <!-- MainWindow contains LinearView -->
+  <line x1="300" y1="970" x2="230" y2="970" class="composition"/>
+  <text x="265" y="965" class="method">contains</text>
+  
+  <!-- MainWindow contains TreeView -->
+  <line x1="500" y1="970" x2="550" y2="970" class="composition"/>
+  <text x="520" y="965" class="method">contains</text>
+  
+  <!-- DSLController uses DSLParser -->
+  <line x1="960" y1="680" x2="1110" y2="900" class="association"/>
+  <text x="1035" y="790" class="method">uses</text>
+  
+  <!-- Views use VisualizationHelper -->
+  <line x1="730" y1="950" x2="800" y2="950" class="association"/>
+  <text x="765" y="945" class="method">uses</text>
+
+  <!-- Legend -->
+  <text x="50" y="1100" class="title" font-size="14">图例 (Legend)</text>
+  <line x1="50" y1="1120" x2="100" y2="1120" class="inheritance" marker-end="url(#triangle)"/>
+  <text x="110" y="1125" class="method">继承 (Inheritance)</text>
+  
+  <line x1="50" y1="1140" x2="100" y2="1140" class="composition" marker-end="url(#diamond)"/>
+  <text x="110" y="1145" class="method">组合 (Composition)</text>
+  
+  <line x1="250" y1="1120" x2="300" y2="1120" class="association" marker-end="url(#arrow)"/>
+  <text x="310" y="1125" class="method">关联 (Association)</text>
+</svg>

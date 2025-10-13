@@ -20,19 +20,23 @@ LINEAR_DSL_GRAMMAR = r"""
            | pop_cmd
            | clear_cmd
     
-    create_cmd: "create" structure_type ["with" values]
-    insert_cmd: "insert" value "at" position "in" structure_name
-    delete_cmd: "delete" (value | "at" position) "from" structure_name
-    get_cmd: "get" (value | "at" position) "from" structure_name
-    push_cmd: "push" value "to" structure_name
-    pop_cmd: "pop" "from" structure_name
-    clear_cmd: "clear" structure_name
+    create_cmd: "create" STRUCTURE_TYPE ["with" values]
+    insert_cmd: "insert" value "at" position "in" STRUCTURE_NAME
+    delete_cmd: "delete" delete_target "from" STRUCTURE_NAME
+    get_cmd: "get" get_target "from" STRUCTURE_NAME
+    push_cmd: "push" value "to" STRUCTURE_NAME
+    pop_cmd: "pop" "from" STRUCTURE_NAME
+    clear_cmd: "clear" STRUCTURE_NAME
     
-    structure_type: "arraylist" | "linkedlist" | "stack"
-    structure_name: "arraylist" | "linkedlist" | "stack"
+    delete_target: value | "at" position
+    get_target: value | "at" position
+    
     values: value ("," value)*
     value: NUMBER
     position: NUMBER
+    
+    STRUCTURE_TYPE: "arraylist" | "linkedlist" | "stack"
+    STRUCTURE_NAME: "arraylist" | "linkedlist" | "stack"
     
     %import common.NUMBER
     %import common.WS
@@ -53,19 +57,16 @@ TREE_DSL_GRAMMAR = r"""
            | decode_cmd
            | clear_cmd
     
-    create_cmd: "create" structure_type ["with" values]
-    insert_cmd: "insert" value ["at" position] "in" structure_name
-    delete_cmd: "delete" value ["at" position] "from" structure_name
-    search_cmd: "search" value "in" structure_name
-    traverse_cmd: "traverse" traverse_type
+    create_cmd: "create" STRUCTURE_TYPE ["with" values]
+    insert_cmd: "insert" value ["at" position] "in" STRUCTURE_NAME
+    delete_cmd: "delete" value ["at" position] "from" STRUCTURE_NAME
+    search_cmd: "search" value "in" STRUCTURE_NAME
+    traverse_cmd: "traverse" TRAVERSE_TYPE
     build_huffman_cmd: "build" "huffman" "with" huffman_values
-    encode_cmd: "encode" STRING "using" "huffman"
-    decode_cmd: "decode" BINARY "using" "huffman"
-    clear_cmd: "clear" structure_name
+    encode_cmd: "encode" STRING "using" HUFFMAN_KEYWORD
+    decode_cmd: "decode" BINARY "using" HUFFMAN_KEYWORD
+    clear_cmd: "clear" STRUCTURE_NAME
     
-    structure_type: "binarytree" | "bst" | "huffman"
-    structure_name: "binarytree" | "bst" | "huffman"
-    traverse_type: "preorder" | "inorder" | "postorder" | "levelorder"
     values: value ("," value)*
     huffman_values: huffman_value ("," huffman_value)*
     huffman_value: CHAR ":" NUMBER
@@ -73,6 +74,10 @@ TREE_DSL_GRAMMAR = r"""
     position: position_value ("," position_value)*
     position_value: NUMBER
     
+    STRUCTURE_TYPE: "binarytree" | "bst" | "huffman"
+    STRUCTURE_NAME: "binarytree" | "bst" | "huffman"
+    TRAVERSE_TYPE: "preorder" | "inorder" | "postorder" | "levelorder"
+    HUFFMAN_KEYWORD: "huffman"
     CHAR: /[a-zA-Z0-9]/
     STRING: /"[^"]*"/
     BINARY: /[01]+/
@@ -88,95 +93,86 @@ class LinearDSLTransformer(Transformer):
     
     @v_args(inline=True)
     def start(self, command):
+        # 直接返回命令元组，而不是Tree对象
         return command
     
     @v_args(inline=True)
+    def command(self, cmd):
+        # 直接返回命令元组，而不是Tree对象
+        return cmd
+    
+    @v_args(inline=True)
     def create_cmd(self, structure_type, values=None):
-        result = {
-            "type": structure_type
-        }
-        
-        if values:
-            result["data"] = values
-        
-        return ("create", result)
+        return ("create", {
+            "structure_type": str(structure_type),
+            "values": values if values else []
+        })
     
     @v_args(inline=True)
     def insert_cmd(self, value, position, structure_name):
-        return {
-            "command": "insert",
+        return ("insert", {
             "value": value,
             "position": position,
-            "structure_name": structure_name
-        }
+            "structure_name": str(structure_name)
+        })
     
     @v_args(inline=True)
     def delete_cmd(self, target, structure_name):
-        result = {
-            "command": "delete",
-            "structure_name": structure_name
-        }
-        
-        if isinstance(target, tuple) and target[0] == "at":
-            result["position"] = target[1]
-        else:
-            result["value"] = target
-        
-        return result
+        return ("delete", {
+            "target": target,
+            "structure_name": str(structure_name)
+        })
     
     @v_args(inline=True)
     def get_cmd(self, target, structure_name):
-        result = {
-            "command": "get",
-            "structure_name": structure_name
-        }
-        
-        if isinstance(target, tuple) and target[0] == "at":
-            result["position"] = target[1]
+        return ("get", {
+            "target": target,
+            "structure_name": str(structure_name)
+        })
+    
+    @v_args(inline=True)
+    def delete_target(self, *args):
+        if len(args) == 2 and str(args[0]) == "at":
+            return {"type": "position", "value": args[1]}
         else:
-            result["value"] = target
-        
-        return result
+            return {"type": "value", "value": args[0]}
+    
+    @v_args(inline=True)
+    def get_target(self, *args):
+        if len(args) == 2 and str(args[0]) == "at":
+            return {"type": "position", "value": args[1]}
+        else:
+            return {"type": "value", "value": args[0]}
     
     @v_args(inline=True)
     def push_cmd(self, value, structure_name):
-        return {
-            "command": "push",
+        return ("push", {
             "value": value,
-            "structure_name": structure_name
-        }
+            "structure_name": str(structure_name)
+        })
     
     @v_args(inline=True)
     def pop_cmd(self, structure_name):
-        return {
-            "command": "pop",
-            "structure_name": structure_name
-        }
+        return ("pop", {
+            "structure_name": str(structure_name)
+        })
     
     @v_args(inline=True)
     def clear_cmd(self, structure_name):
         return ("clear", {
+            "structure_name": str(structure_name)
         })
     
-    @v_args(inline=True)
-    def structure_type(self, s):
-        return str(s)
+    def values(self, args):
+        return [item for item in args]
     
     @v_args(inline=True)
-    def structure_name(self, s):
-        return str(s)
+    def value(self, token):
+        return int(token)
     
     @v_args(inline=True)
-    def values(self, *args):
-        return list(args)
-    
-    @v_args(inline=True)
-    def value(self, n):
-        return int(n)
-    
-    @v_args(inline=True)
-    def position(self, n):
-        return int(n)
+    def position(self, token):
+        return int(token)
 
 
 class TreeDSLTransformer(Transformer):
@@ -184,104 +180,70 @@ class TreeDSLTransformer(Transformer):
     
     @v_args(inline=True)
     def start(self, command):
+        # 直接返回命令元组，而不是Tree对象
         return command
     
     @v_args(inline=True)
+    def command(self, cmd):
+        # 直接返回命令元组，而不是Tree对象
+        return cmd
+    
+    @v_args(inline=True)
     def create_cmd(self, structure_type, values=None):
-        result = {
-            "command": "create",
-            "structure_type": structure_type
-        }
-        
-        if values:
-            result["values"] = values
-        
-        return result
+        return ("create", {
+            "structure_type": str(structure_type),
+            "values": values if values else []
+        })
     
     @v_args(inline=True)
     def insert_cmd(self, value, position=None, structure_name=None):
-        if structure_name is None:
-            structure_name = position
-            position = None
-        
-        result = {
-            "value": value
-        }
-        
-        if position:
-            result["position"] = position
-        
-        return ("insert", result)
+        return ("insert", {
+            "value": value,
+            "position": position,
+            "structure_name": str(structure_name) if structure_name else None
+        })
     
     @v_args(inline=True)
     def delete_cmd(self, value, position=None, structure_name=None):
-        if structure_name is None:
-            structure_name = position
-            position = None
-        
-        result = {
-            "value": value
-        }
-        
-        if position:
-            result["position"] = position
-        
-        return ("delete", result)
+        return ("delete", {
+            "value": value,
+            "position": position,
+            "structure_name": str(structure_name) if structure_name else None
+        })
     
     @v_args(inline=True)
     def search_cmd(self, value, structure_name):
-        return ("search", {
-            "value": value
-        })
+        return ("search", {"value": value, "structure_name": str(structure_name)})
     
     @v_args(inline=True)
     def traverse_cmd(self, traverse_type):
-        return ("traverse", {
-            "traverse_type": traverse_type
-        })
+        return ("traverse", {"type": str(traverse_type)})
     
     @v_args(inline=True)
     def build_huffman_cmd(self, huffman_values):
-        return ("build_huffman", {
-            "frequencies": huffman_values
-        })
+        return ("build_huffman", {"values": huffman_values})
     
     @v_args(inline=True)
-    def encode_cmd(self, text, _):
-        # 去除引号
-        text = text[1:-1] if text.startswith('"') and text.endswith('"') else text
+    def encode_cmd(self, text, huffman_keyword):
         return ("encode", {
-            "text": text
+            "text": str(text).strip('"'),  # 移除引号
+            "huffman": str(huffman_keyword)
         })
     
     @v_args(inline=True)
-    def decode_cmd(self, binary, _):
-        return ("decode", {
-            "binary": binary
-        })
+    def decode_cmd(self, binary, huffman_keyword):
+        return ("decode", {"binary": str(binary), "huffman": str(huffman_keyword)})
     
     @v_args(inline=True)
     def clear_cmd(self, structure_name):
-        return ("clear", {})
+        return ("clear", {
+            "structure_name": str(structure_name)
+        })
     
-    @v_args(inline=True)
-    def structure_type(self, s):
-        return str(s)
+    def values(self, args):
+        return [item for item in args]
     
-    @v_args(inline=True)
-    def structure_name(self, s):
-        return str(s)
-    
-    @v_args(inline=True)
-    def traverse_type(self, t):
-        return str(t)
-    
-    @v_args(inline=True)
-    def values(self, *args):
-        return list(args)
-    
-    @v_args(inline=True)
-    def huffman_values(self, *args):
+    def huffman_values(self, args):
         return dict(args)
     
     @v_args(inline=True)
@@ -289,28 +251,15 @@ class TreeDSLTransformer(Transformer):
         return (char, int(freq))
     
     @v_args(inline=True)
-    def value(self, n):
-        return int(n)
+    def value(self, token):
+        return int(token)
+    
+    def position(self, args):
+        return [item for item in args]
     
     @v_args(inline=True)
-    def position(self, *args):
-        return list(args)
-    
-    @v_args(inline=True)
-    def position_value(self, n):
-        return int(n)
-    
-    @v_args(inline=True)
-    def CHAR(self, c):
-        return str(c)
-    
-    @v_args(inline=True)
-    def STRING(self, s):
-        return str(s)
-    
-    @v_args(inline=True)
-    def BINARY(self, b):
-        return str(b)
+    def position_value(self, token):
+        return int(token)
 
 
 def parse_linear_dsl(command_str):
@@ -323,8 +272,10 @@ def parse_linear_dsl(command_str):
         解析后的命令对象
     """
     try:
-        parser = Lark(LINEAR_DSL_GRAMMAR, parser='lalr', transformer=LinearDSLTransformer())
-        return parser.parse(command_str)
+        parser = Lark(LINEAR_DSL_GRAMMAR, parser='lalr')
+        tree = parser.parse(command_str)
+        transformer = LinearDSLTransformer()
+        return transformer.transform(tree)
     except Exception as e:
         return ("error", {
             "error": f"解析错误: {str(e)}"
@@ -386,8 +337,10 @@ def parse_tree_dsl(command_str):
                     })
         
         # 如果不是带前缀的命令，使用原有解析方式
-        parser = Lark(TREE_DSL_GRAMMAR, parser='lalr', transformer=TreeDSLTransformer())
-        return parser.parse(command_str)
+        parser = Lark(TREE_DSL_GRAMMAR, parser='lalr')
+        tree = parser.parse(command_str)
+        transformer = TreeDSLTransformer()
+        return transformer.transform(tree)
     except Exception as e:
         return {
             "error": f"解析错误: {str(e)}",
