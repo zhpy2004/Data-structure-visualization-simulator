@@ -8,7 +8,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
                              QMessageBox, QSplitter, QFrame, QScrollArea)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor
 
 
@@ -27,7 +27,7 @@ class LinearView(QWidget):
         """
         # 显示弹窗
         QMessageBox.information(self, title, message)
-        
+    
     def update_view(self, structure):
         """更新视图显示
         
@@ -38,7 +38,6 @@ class LinearView(QWidget):
         if hasattr(self, 'visualization_area'):
             self.visualization_area.structure = structure
             self.visualization_area.update()
-
     
     def __init__(self):
         """初始化线性结构视图"""
@@ -46,6 +45,19 @@ class LinearView(QWidget):
         
         # 当前选择的数据结构类型
         self.current_structure = "array_list"  # 默认为顺序表
+        
+        # 动画步骤
+        self.animation_steps = []
+        self.current_step_index = -1
+        self._before_state = None
+        self._after_state = None
+        
+        # 播放控制
+        self.play_timer = QTimer(self)
+        self.play_timer.timeout.connect(self._on_timer_tick)
+        self.is_playing = False
+        self.play_speed_factor = 1.0
+        self.play_base_interval_ms = 800
         
         # 初始化UI
         self._init_ui()
@@ -121,6 +133,31 @@ class LinearView(QWidget):
         buttons_layout.addWidget(self.pop_button)
         buttons_layout.addWidget(self.peek_button)
         
+        # 遍历/动画控制按钮
+        self.prev_step_button = QPushButton("上一步")
+        self.next_step_button = QPushButton("下一步")
+        self.prev_step_button.setEnabled(False)
+        self.next_step_button.setEnabled(False)
+        buttons_layout.addWidget(self.prev_step_button)
+        buttons_layout.addWidget(self.next_step_button)
+        
+        # 动态播放控制
+        self.play_button = QPushButton("播放")
+        self.replay_button = QPushButton("重新播放")
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["0.5x", "1x", "2x", "4x"])
+        self.speed_combo.setCurrentText("1x")
+        buttons_layout.addWidget(self.play_button)
+        buttons_layout.addWidget(self.replay_button)
+        buttons_layout.addWidget(QLabel("速度"))
+        buttons_layout.addWidget(self.speed_combo)
+        
+        # 隐藏步进按钮（改为动态播放）
+        self.prev_step_button.hide()
+        self.next_step_button.hide()
+        self.prev_step_button.setEnabled(False)
+        self.next_step_button.setEnabled(False)
+        
         # 默认隐藏栈操作按钮
         self.push_button.hide()
         self.pop_button.hide()
@@ -185,6 +222,15 @@ class LinearView(QWidget):
         self.push_button.clicked.connect(self._push_item)
         self.pop_button.clicked.connect(self._pop_item)
         self.peek_button.clicked.connect(self._peek_item)
+        
+        # 连接动画控制按钮
+        self.prev_step_button.clicked.connect(self._prev_step)
+        self.next_step_button.clicked.connect(self._next_step)
+        
+        # 连接动态播放控制
+        self.play_button.clicked.connect(self._toggle_play)
+        self.replay_button.clicked.connect(self._replay)
+        self.speed_combo.currentIndexChanged.connect(self._update_speed)
     
     def _structure_changed(self, index):
         """数据结构类型改变处理
@@ -222,34 +268,28 @@ class LinearView(QWidget):
         self.status_label.setText(f"当前数据结构: {self.structure_combo.currentText()}")
     
     def _create_structure(self):
-        """创建新的数据结构"""
-        # 获取输入值
+        """创建数据结构"""
+        # 获取选择的数据结构类型
+        structure_type = self.current_structure
+        
+        # 解析输入值
         values_text = self.value_input.text().strip()
+        values = []
+        if values_text:
+            try:
+                values = [int(v.strip()) for v in values_text.split(',') if v.strip() != '']
+            except ValueError:
+                QMessageBox.warning(self, "警告", "请输入有效的整数列表，例如：1,2,3")
+                return
         
-        if not values_text:
-            QMessageBox.warning(self, "警告", "请输入初始值")
-            return
+        # 发射操作信号
+        self.operation_triggered.emit("create", {
+            "structure_type": structure_type,
+            "values": values
+        })
         
-        try:
-            # 解析输入值
-            if "," in values_text:
-                # 多个值，解析为列表
-                values = [int(v.strip()) for v in values_text.split(",")]
-            else:
-                # 单个值
-                values = [int(values_text)]
-            
-            # 发射操作信号
-            self.operation_triggered.emit("create", {
-                "structure_type": self.current_structure,
-                "values": values
-            })
-            
-            # 更新状态
-            self.status_label.setText(f"已创建{self.structure_combo.currentText()}")
-            
-        except ValueError:
-            QMessageBox.warning(self, "警告", "请输入有效的整数值")
+        # 更新状态
+        self.status_label.setText(f"已创建{self.structure_combo.currentText()}，初始数据: {values}")
     
     def _clear_structure(self):
         """清空当前数据结构"""
@@ -315,28 +355,14 @@ class LinearView(QWidget):
     
     def _push_item(self):
         """入栈操作"""
-        # 获取输入值
-        value_text = self.value_input.text().strip()
+        # 发射操作信号
+        self.operation_triggered.emit("push", {
+            "structure_type": "stack",
+            "value": self.value_input.text().strip()
+        })
         
-        if not value_text:
-            QMessageBox.warning(self, "警告", "请输入要入栈的值")
-            return
-        
-        try:
-            # 解析输入值
-            value = int(value_text)
-            
-            # 发射操作信号
-            self.operation_triggered.emit("push", {
-                "structure_type": "stack",
-                "value": value
-            })
-            
-            # 更新状态
-            self.status_label.setText(f"已将{value}入栈")
-            
-        except ValueError:
-            QMessageBox.warning(self, "警告", "请输入有效的整数值")
+        # 更新状态
+        self.status_label.setText("已执行入栈操作")
     
     def _pop_item(self):
         """出栈操作"""
@@ -367,22 +393,459 @@ class LinearView(QWidget):
         # 重绘画布
         self.canvas.update()
     
-    def show_result(self, operation, result):
-        """显示操作结果
+    def update_visualization_with_animation(self, before_state, after_state, operation_type, index=None, value=None):
+        """使用动画更新可视化显示（顺序表/链表/栈）"""
+        # 确定结构类型
+        struct_type = None
+        if before_state:
+            struct_type = before_state.get('type')
+        if not struct_type and after_state:
+            struct_type = after_state.get('type')
         
-        Args:
-            operation: 操作名称
-            result: 操作结果
-        """
-        if operation == "get":
-            QMessageBox.information(self, "获取结果", f"位置 {result['position']} 的元素值为: {result['value']}")
-        elif operation == "peek":
-            QMessageBox.information(self, "栈顶元素", f"栈顶元素值为: {result['value']}")
-        elif operation == "pop":
-            QMessageBox.information(self, "出栈结果", f"出栈元素值为: {result['value']}")
+        if struct_type in ('array_list', 'linked_list', 'stack'):
+            self._before_state = before_state
+            self._after_state = after_state
+            
+            if struct_type == 'array_list':
+                self.animation_steps = self._build_array_animation_steps(before_state, after_state, operation_type, index, value)
+            elif struct_type == 'linked_list':
+                self.animation_steps = self._build_linked_animation_steps(before_state, after_state, operation_type, index, value)
+            else:
+                # 栈动画
+                self.animation_steps = self._build_stack_animation_steps(before_state, after_state, operation_type, value)
+            
+            self.current_step_index = -1
+            
+            # 启用播放控制按钮
+            can_play = True if self.animation_steps else False
+            self.play_button.setEnabled(can_play)
+            self.replay_button.setEnabled(can_play)
+            
+            # 显示第一步并自动播放
+            self._next_step()
+            self._start_playback()
+        else:
+            # 非支持类型，直接更新
+            self.update_visualization(after_state)
+    
+    def _build_array_animation_steps(self, before_state, after_state, operation_type, index, value):
+        """构建顺序表动画步骤"""
+        steps = []
+        before_list = before_state.get('data') or before_state.get('elements') or []
+        after_list = after_state.get('data') or after_state.get('elements') or before_list
+        before_size = before_state.get('size', len(before_list))
+        after_size = after_state.get('size', len(after_list))
+        before_capacity = before_state.get('capacity', max(before_size, len(before_list)))
+        after_capacity = after_state.get('capacity', max(after_size, len(after_list)))
         
-        # 更新状态
-        self.status_label.setText(f"操作 {operation} 完成")
+        if operation_type == 'get':
+            steps.append({
+                'type': 'highlight', 'index': index,
+                'display_data': before_list.copy(),
+                'size': before_size, 'capacity': before_capacity
+            })
+            return steps
+        
+        if operation_type == 'insert':
+            # 初始高亮
+            steps.append({
+                'type': 'highlight', 'index': index,
+                'display_data': before_list.copy(),
+                'size': before_size, 'capacity': before_capacity
+            })
+            # 扩展显示列表到插入后的大小
+            display = before_list.copy()
+            display.append(None)
+            # 右移
+            for j in range(before_size - 1, index - 1, -1):
+                # 将元素右移到 j+1
+                display[j + 1] = display[j]
+                display[j] = None
+                steps.append({
+                    'type': 'shift_right', 'index': j,
+                    'display_data': display.copy(),
+                    'size': before_size, 'capacity': before_capacity
+                })
+            # 插入新值
+            display[index] = value
+            steps.append({
+                'type': 'insert_value', 'index': index, 'value': value,
+                'display_data': display.copy(),
+                'size': after_size, 'capacity': after_capacity
+            })
+            # 最终状态
+            steps.append({
+                'type': 'final', 'index': None,
+                'display_data': after_list.copy(),
+                'size': after_size, 'capacity': after_capacity
+            })
+            return steps
+        
+        if operation_type == 'delete':
+            # 初始高亮
+            steps.append({
+                'type': 'highlight', 'index': index,
+                'display_data': before_list.copy(),
+                'size': before_size, 'capacity': before_capacity
+            })
+            # 删除元素（淡出为 None）
+            display = before_list.copy()
+            display[index] = None
+            steps.append({
+                'type': 'delete_value', 'index': index,
+                'display_data': display.copy(),
+                'size': before_size, 'capacity': before_capacity
+            })
+            # 左移
+            for j in range(index + 1, before_size):
+                display[j - 1] = display[j]
+                display[j] = None
+                steps.append({
+                    'type': 'shift_left', 'index': j,
+                    'display_data': display.copy(),
+                    'size': before_size, 'capacity': before_capacity
+                })
+            # 最终状态
+            steps.append({
+                'type': 'final', 'index': None,
+                'display_data': after_list.copy(),
+                'size': after_state.get('size', len(after_list)),
+                'capacity': after_state.get('capacity', max(len(after_list), before_capacity))
+            })
+            return steps
+        
+        # 默认无动画
+        return steps
+    
+    def _build_linked_animation_steps(self, before_state, after_state, operation_type, index, value):
+        """构建链表动画步骤"""
+        steps = []
+        # 获取值列表
+        before_nodes = before_state.get('nodes', [])
+        before_list = [n.get('data') for n in before_nodes]
+        after_nodes = after_state.get('nodes', [])
+        after_list = [n.get('data') for n in after_nodes] if after_nodes else before_list
+        size_before = before_state.get('size', len(before_list))
+        size_after = after_state.get('size', len(after_list))
+        
+        # 遍历步进函数
+        def append_traverse_steps(target_idx):
+            for j in range(0, min(target_idx, size_before - 1) + 1):
+                steps.append({
+                    'struct': 'linked_list',
+                    'type': 'traverse',
+                    'index': j,
+                    'display_data': before_list.copy(),
+                    'size': size_before
+                })
+        
+        if operation_type == 'get':
+            append_traverse_steps(index)
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'final',
+                'index': index,
+                'display_data': before_list.copy(),
+                'size': size_before
+            })
+            return steps
+        
+        if operation_type == 'insert':
+            # 遍历到插入位置的前一个节点（头插除外）
+            if index > 0:
+                append_traverse_steps(index - 1)
+            else:
+                # 头插：高亮头节点（如果存在）
+                if size_before > 0:
+                    steps.append({
+                        'struct': 'linked_list',
+                        'type': 'traverse',
+                        'index': 0,
+                        'display_data': before_list.copy(),
+                        'size': size_before
+                    })
+            # 插入显示
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'insert_value',
+                'index': index,
+                'display_data': after_list.copy(),
+                'size': size_after
+            })
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'final',
+                'index': None,
+                'display_data': after_list.copy(),
+                'size': size_after
+            })
+            return steps
+        
+        if operation_type == 'delete':
+            # 遍历到删除位置的前一个节点（头删除外）
+            if index > 0:
+                append_traverse_steps(index - 1)
+            # 高亮目标节点
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'highlight',
+                'index': index,
+                'display_data': before_list.copy(),
+                'size': size_before
+            })
+            # 删除后显示
+            temp = before_list.copy()
+            if 0 <= index < len(temp):
+                temp.pop(index)
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'delete_value',
+                'index': index,
+                'display_data': temp,
+                'size': len(temp)
+            })
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'final',
+                'index': None,
+                'display_data': after_list.copy(),
+                'size': size_after
+            })
+            return steps
+        
+        # 默认无动画
+        return steps
+    
+    def _build_stack_animation_steps(self, before_state, after_state, operation_type, value=None):
+        """构建栈动画步骤"""
+        steps = []
+        before_list = before_state.get('data', [])
+        after_list = after_state.get('data', before_list)
+        capacity_before = before_state.get('capacity')
+        capacity_after = after_state.get('capacity', capacity_before)
+        
+        # 高亮栈顶（若存在）
+        if before_list:
+            steps.append({
+                'struct': 'stack',
+                'type': 'highlight',
+                'index': len(before_list) - 1,
+                'display_data': before_list.copy(),
+                'size': len(before_list),
+                'capacity': capacity_before
+            })
+        
+        if operation_type == 'push':
+            # 推入后显示新栈顶
+            steps.append({
+                'struct': 'stack',
+                'type': 'insert_value',
+                'index': len(after_list) - 1 if after_list else None,
+                'display_data': after_list.copy(),
+                'size': len(after_list),
+                'capacity': capacity_after
+            })
+            steps.append({
+                'struct': 'stack',
+                'type': 'final',
+                'index': None,
+                'display_data': after_list.copy(),
+                'size': len(after_list),
+                'capacity': capacity_after
+            })
+            return steps
+        
+        if operation_type == 'pop':
+            # 弹出后显示新的栈顶或空栈
+            steps.append({
+                'struct': 'stack',
+                'type': 'delete_value',
+                'index': len(before_list) - 1 if before_list else None,
+                'display_data': after_list.copy(),
+                'size': len(after_list),
+                'capacity': capacity_after
+            })
+            steps.append({
+                'struct': 'stack',
+                'type': 'final',
+                'index': None,
+                'display_data': after_list.copy(),
+                'size': len(after_list),
+                'capacity': capacity_after
+            })
+            return steps
+        
+        if operation_type == 'peek':
+            # 仅高亮栈顶，最终状态为原始
+            steps.append({
+                'struct': 'stack',
+                'type': 'final',
+                'index': len(before_list) - 1 if before_list else None,
+                'display_data': before_list.copy(),
+                'size': len(before_list),
+                'capacity': capacity_before
+            })
+            return steps
+        
+        return steps
+    
+    def _on_timer_tick(self):
+        """定时器触发：自动前进动画步进"""
+        if not self.animation_steps:
+            self._pause_playback()
+            return
+        if self.current_step_index < len(self.animation_steps) - 1:
+            self._next_step()
+        else:
+            self._pause_playback()
+            self.status_label.setText("动画完成")
+    
+    def _current_interval_ms(self):
+        """根据速度下拉框计算当前播放间隔"""
+        text = self.speed_combo.currentText() if hasattr(self, 'speed_combo') else "1x"
+        try:
+            factor = float(text.replace('x',''))
+        except Exception:
+            factor = 1.0
+        # 保存倍速，便于其他逻辑复用
+        self.play_speed_factor = factor
+        # 倍速越大，间隔越短；设置下限避免过快
+        return int(self.play_base_interval_ms / max(0.25, factor))
+    
+    def _start_playback(self):
+        """开始播放动画"""
+        if not self.animation_steps:
+            return
+        self.is_playing = True
+        self.play_button.setText("暂停")
+        self.play_timer.start(self._current_interval_ms())
+        self.status_label.setText("播放中…")
+    
+    def _pause_playback(self):
+        """暂停播放动画"""
+        self.play_timer.stop()
+        self.is_playing = False
+        self.play_button.setText("播放")
+        self.status_label.setText("已暂停")
+    
+    def _toggle_play(self):
+        """切换播放/暂停"""
+        if not self.animation_steps:
+            return
+        # 若已到结尾，重新播放
+        if self.current_step_index >= len(self.animation_steps) - 1:
+            self._replay()
+            self._start_playback()
+            return
+        if self.is_playing:
+            self._pause_playback()
+        else:
+            self._start_playback()
+    
+    def _replay(self):
+        """重新播放，从头开始"""
+        if not self.animation_steps:
+            return
+        self._pause_playback()
+        self.current_step_index = -1
+        self.canvas.highlighted_index = None
+        self.status_label.setText("已重置，准备播放…")
+        # 立即展示第一步并自动开始播放
+        self._next_step()
+        self._start_playback()
+    
+    def _update_speed(self):
+        """更新播放速度并重启定时器（若正在播放）"""
+        text = self.speed_combo.currentText() if hasattr(self, 'speed_combo') else "1x"
+        try:
+            self.play_speed_factor = float(text.replace('x',''))
+        except Exception:
+            self.play_speed_factor = 1.0
+        if self.is_playing:
+            self.play_timer.start(self._current_interval_ms())
+
+    def _apply_step(self, step):
+        """应用单个动画步骤到画布"""
+        if not step:
+            return
+        
+        # 设置高亮索引
+        self.canvas.highlighted_index = step.get('index')
+        
+        # 选择结构类型
+        struct_type = step.get('struct', self._before_state.get('type') if self._before_state else 'array_list')
+        
+        # 更新数据（显示用）
+        if struct_type == 'linked_list':
+            nodes = [{'id': i, 'data': val} for i, val in enumerate(step.get('display_data', []))]
+            viz = {
+                'type': 'linked_list',
+                'nodes': nodes,
+                'size': step.get('size')
+            }
+        elif struct_type == 'stack':
+            viz = {
+                'type': 'stack',
+                'data': step.get('display_data', []),
+                'size': step.get('size'),
+                'capacity': step.get('capacity')
+            }
+        else:
+            viz = {
+                'type': 'array_list',
+                'data': step.get('display_data', []),
+                'size': step.get('size'),
+                'capacity': step.get('capacity')
+            }
+        self.canvas.update_data(viz)
+        self.canvas.update()
+        
+        # 更新状态栏文案
+        t = step.get('type')
+        idx = step.get('index')
+        if t == 'highlight' and idx is not None:
+            self.status_label.setText(f"高亮索引 {idx}")
+        elif t == 'traverse':
+            self.status_label.setText(f"遍历到索引 {idx}")
+        elif t == 'shift_right':
+            self.status_label.setText("右移元素…")
+        elif t == 'shift_left':
+            self.status_label.setText("左移元素…")
+        elif t == 'insert_value':
+            self.status_label.setText("插入新元素…")
+        elif t == 'delete_value':
+            self.status_label.setText("删除元素…")
+        elif t == 'final':
+            self.status_label.setText("动画完成")
+    
+    def _prev_step(self):
+        """处理上一步按钮点击事件（顺序表动画）"""
+        if not self.animation_steps:
+            return
+        if self.current_step_index > 0:
+            self.current_step_index -= 1
+            step = self.animation_steps[self.current_step_index]
+            self._apply_step(step)
+            self.next_step_button.setEnabled(True)
+            if self.current_step_index == 0:
+                self.prev_step_button.setEnabled(False)
+    
+
+
+    def _next_step(self):
+        """处理下一步按钮点击事件（顺序表动画）"""
+        if not self.animation_steps:
+            return
+
+        if self.current_step_index < len(self.animation_steps) - 1:
+            self.current_step_index += 1
+            step = self.animation_steps[self.current_step_index]
+            self._apply_step(step)
+            self.prev_step_button.setEnabled(self.current_step_index > 0)
+            if self.current_step_index == len(self.animation_steps) - 1:
+                self.next_step_button.setEnabled(False)
+        else:
+            self.next_step_button.setEnabled(False)
 
 
 class LinearCanvas(QWidget):
@@ -398,6 +861,9 @@ class LinearCanvas(QWidget):
         # 初始化数据
         self.data = None
         self.structure_type = None
+        self.capacity = None
+        self.size = None
+        self.highlighted_index = None
     
     def update_data(self, data):
         """更新数据
@@ -408,9 +874,14 @@ class LinearCanvas(QWidget):
         if not data:
             self.data = None
             self.structure_type = None
+            self.capacity = None
+            self.size = None
+            self.highlighted_index = None
             return
             
         self.structure_type = data.get("type")
+        self.capacity = data.get("capacity")
+        self.size = data.get("size")
         
         if self.structure_type == "linked_list":
             # 链表数据格式特殊处理
@@ -421,8 +892,6 @@ class LinearCanvas(QWidget):
             if not self.data:
                 # 尝试其他可能的键
                 self.data = data.get("data", [])
-        
-
         
         # 根据数据量调整画布大小
         self._adjust_canvas_size()
@@ -469,8 +938,6 @@ class LinearCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-
-        
         # 根据结构类型选择绘制方法
         if self.structure_type == "array_list":
             self._draw_array_list(painter)
@@ -500,6 +967,9 @@ class LinearCanvas(QWidget):
         
         # 绘制顺序表标题
         painter.drawText(start_x, start_y - 30, "顺序表")
+        # 绘制容量和大小
+        if self.capacity is not None and self.size is not None:
+            painter.drawText(start_x + 120, start_y - 30, f"容量: {self.capacity}  大小: {self.size}")
         
         # 绘制索引
         for i in range(len(self.data)):
@@ -511,11 +981,22 @@ class LinearCanvas(QWidget):
             x = start_x + i * cell_width
             
             # 绘制单元格
-            painter.setPen(QPen(Qt.black, 2))
+            if self.highlighted_index is not None and i == self.highlighted_index:
+                painter.setPen(QPen(QColor(255, 152, 0), 2))
+                painter.setBrush(QColor(255, 224, 178))
+            else:
+                painter.setPen(QPen(Qt.black, 2))
+                painter.setBrush(Qt.NoBrush)
             painter.drawRect(x, start_y, cell_width, cell_height)
             
             # 绘制值
-            painter.drawText(x + 20, start_y + 25, str(value))
+            if value is None:
+                # 空位保留为空或显示占位
+                painter.setPen(QPen(QColor(150, 150, 150)))
+                painter.drawText(x + 20, start_y + 25, "")
+            else:
+                painter.setPen(QPen(Qt.black))
+                painter.drawText(x + 20, start_y + 25, str(value))
     
     def _draw_linked_list(self, painter):
         """绘制链表
@@ -537,12 +1018,22 @@ class LinearCanvas(QWidget):
         # 绘制链表标题
         painter.drawText(start_x, start_y - 30, "链表")
         
+        # 绘制索引标签
+        for i in range(len(self.data)):
+            x = start_x + i * (node_width + arrow_length)
+            painter.drawText(x + 20, start_y - 10, str(i))
+        
         # 绘制节点和箭头
         for i, value in enumerate(self.data):
             x = start_x + i * (node_width + arrow_length)
             
-            # 绘制节点
-            painter.setPen(QPen(Qt.black, 2))
+            # 绘制节点（支持高亮）
+            if self.highlighted_index is not None and i == self.highlighted_index:
+                painter.setPen(QPen(QColor(255, 152, 0), 2))
+                painter.setBrush(QColor(255, 224, 178))
+            else:
+                painter.setPen(QPen(Qt.black, 2))
+                painter.setBrush(Qt.NoBrush)
             painter.drawRect(x, start_y, node_width, node_height)
             
             # 绘制值
@@ -553,10 +1044,9 @@ class LinearCanvas(QWidget):
                 arrow_x = x + node_width
                 arrow_y = start_y + node_height // 2
                 
-                # 绘制箭头线
+                # 箭头线与头部
+                painter.setPen(QPen(QColor(66, 66, 66)))
                 painter.drawLine(arrow_x, arrow_y, arrow_x + arrow_length, arrow_y)
-                
-                # 绘制箭头头部
                 painter.drawLine(arrow_x + arrow_length - 10, arrow_y - 5, arrow_x + arrow_length, arrow_y)
                 painter.drawLine(arrow_x + arrow_length - 10, arrow_y + 5, arrow_x + arrow_length, arrow_y)
         
@@ -564,8 +1054,6 @@ class LinearCanvas(QWidget):
         if self.data:
             last_x = start_x + (len(self.data) - 1) * (node_width + arrow_length) + node_width
             last_y = start_y + node_height // 2
-            
-            # 绘制NULL文本
             painter.drawText(last_x + 10, last_y + 5, "NULL")
     
     def _draw_stack(self, painter):
@@ -589,16 +1077,27 @@ class LinearCanvas(QWidget):
         
         # 绘制栈底和栈顶标记
         if self.data:
+            # 栈底标签
             painter.drawText(start_x - 80, start_y + 5, "栈底")
-            painter.drawText(start_x - 80, start_y - (len(self.data) - 1) * cell_height + 5, "栈顶")
+            # 栈顶标签，避免单元素时与栈底重叠
+            top_label_y = start_y - (len(self.data) - 1) * cell_height + 5
+            if len(self.data) == 1:
+                top_label_y = start_y - cell_height + 5  # 上移到单元格顶部上方
+            painter.drawText(start_x - 80, top_label_y, "栈顶")
         
         # 绘制栈元素（从下往上）
-        for i, value in enumerate(reversed(self.data)):
+        for i, value in enumerate(self.data):
             y = start_y - i * cell_height
             
-            # 绘制单元格
-            painter.setPen(QPen(Qt.black, 2))
+            # 绘制单元格（支持高亮栈顶或指定索引）
+            if self.highlighted_index is not None and i == self.highlighted_index:
+                painter.setPen(QPen(QColor(255, 152, 0), 2))
+                painter.setBrush(QColor(255, 224, 178))
+            else:
+                painter.setPen(QPen(Qt.black, 2))
+                painter.setBrush(Qt.NoBrush)
             painter.drawRect(start_x, y, cell_width, cell_height)
             
             # 绘制值
+            painter.setPen(QPen(Qt.black))
             painter.drawText(start_x + 40, y + 25, str(value))

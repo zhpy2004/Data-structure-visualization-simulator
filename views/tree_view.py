@@ -6,12 +6,11 @@
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                             QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
+                             QComboBox, QLineEdit, QGroupBox, QFormLayout,
                              QMessageBox, QSplitter, QFrame, QRadioButton, QButtonGroup,
-                             QScrollArea, QApplication)
+                             QScrollArea, QApplication, QMenu, QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QBrush
-import math
 
 
 class TreeView(QWidget):
@@ -26,12 +25,25 @@ class TreeView(QWidget):
         Args:
             structure: 要显示的数据结构
         """
-        if hasattr(self, 'canvas'):
-            self.canvas.structure = structure
-            self.canvas.update()
-        else:
-            # 如果canvas不存在，显示错误信息
+        # 确保画布存在
+        if not hasattr(self, 'canvas'):
             self.show_message("错误", "画布组件未正确初始化")
+            return
+        
+        # 处理空结构
+        if structure is None:
+            self.status_label.setText("暂无数据结构")
+            self.update_visualization({'type': None, 'nodes': []}, None)
+            return
+        
+        # 获取结构的可视化数据并更新显示
+        try:
+            vis_data = structure.get_visualization_data()
+        except Exception as e:
+            self.show_message("错误", f"获取可视化数据失败: {e}")
+            return
+        
+        self.update_visualization(vis_data, vis_data.get('type'))
     
     def show_message(self, title, message):
         """显示消息对话框
@@ -126,6 +138,13 @@ class TreeView(QWidget):
         self.avl_build_steps = []
         self.current_avl_step = 0
         
+        # 二叉树遍历播放控制（仿线性表）
+        self.traversal_play_timer = QTimer(self)
+        self.traversal_play_timer.timeout.connect(self._on_traversal_timer_tick)
+        self.traversal_is_playing = False
+        self.traversal_play_base_interval_ms = 800
+        self.traversal_play_speed_factor = 1.0
+        
         # 初始化UI
         self._init_ui()
         
@@ -214,6 +233,8 @@ class TreeView(QWidget):
         buttons_layout.addWidget(self.remove_button)
         buttons_layout.addWidget(self.search_button)
         buttons_layout.addWidget(self.traverse_button)
+        # 默认隐藏搜索按钮
+        self.search_button.hide()
         
         # 哈夫曼树特有操作按钮
         self.encode_button = QPushButton("编码")
@@ -232,6 +253,26 @@ class TreeView(QWidget):
         
         buttons_layout.addWidget(self.prev_step_button)
         buttons_layout.addWidget(self.next_step_button)
+        
+        # 隐藏手动遍历步进按钮
+        self.prev_step_button.hide()
+        self.next_step_button.hide()
+        
+        # 播放控制（仿线性表）
+        self.play_button = QPushButton("播放")
+        self.replay_button = QPushButton("重新播放")
+        self.play_button.setEnabled(False)
+        self.replay_button.setEnabled(False)
+        buttons_layout.addWidget(self.play_button)
+        buttons_layout.addWidget(self.replay_button)
+        
+        # 速度控制（仿线性表）
+        speed_label = QLabel("速度")
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["0.5x", "1x", "2x", "4x"]) 
+        self.speed_combo.setCurrentText("1x")
+        buttons_layout.addWidget(speed_label)
+        buttons_layout.addWidget(self.speed_combo)
         
         # 默认隐藏哈夫曼树操作按钮
         self.encode_button.hide()
@@ -303,8 +344,10 @@ class TreeView(QWidget):
         self.prev_step_button.clicked.connect(self._prev_step)
         self.next_step_button.clicked.connect(self._next_step)
         
-        # 连接动画控制按钮
-
+        # 遍历播放控件信号（仿线性表）
+        self.play_button.clicked.connect(self._toggle_traversal_play)
+        self.replay_button.clicked.connect(self._replay_traversal)
+        self.speed_combo.currentIndexChanged.connect(self._update_traversal_speed)
         
         # 连接哈夫曼动画定时器
         self.huffman_animation_timer.timeout.connect(self._animate_huffman_build)
@@ -348,20 +391,20 @@ class TreeView(QWidget):
         elif self.current_structure == "bst":
             # 二叉搜索树页面隐藏遍历按钮
             self.traverse_button.hide()
-            # 显示其他按钮
+            # 显示其他按钮（隐藏搜索按钮）
             self.insert_button.show()
             self.remove_button.show()
-            self.search_button.show()
+            self.search_button.hide()
             # 隐藏哈夫曼树特有操作按钮
             self.encode_button.hide()
             self.decode_button.hide()
             # 隐藏遍历方式选择框
             self.traversal_box.hide()
         elif self.current_structure == "avl_tree":
-            # AVL树页面显示所有基本操作按钮
+            # AVL树页面显示基本操作按钮（隐藏搜索按钮）
             self.insert_button.show()
             self.remove_button.show()
-            self.search_button.show()
+            self.search_button.hide()
             self.traverse_button.show()
             # 隐藏哈夫曼树特有操作按钮
             self.encode_button.hide()
@@ -471,6 +514,14 @@ class TreeView(QWidget):
         # 停止任何正在运行的动画定时器
         if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
             self.animation_timer.stop()
+        # 停止遍历播放并重置控件
+        if hasattr(self, 'traversal_play_timer') and self.traversal_play_timer.isActive():
+            self.traversal_play_timer.stop()
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(False)
+            self.replay_button.setEnabled(False)
+            self.play_button.setText("播放")
+        self.traversal_is_playing = False
         
         # 更新状态
         self.status_label.setText(f"已清空{self.structure_combo.currentText()}")
@@ -725,16 +776,114 @@ class TreeView(QWidget):
         self.prev_step_button.setEnabled(True)
         self.next_step_button.setEnabled(True)
         
+        # 启用遍历播放控件（仿线性表）
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(True)
+            self.replay_button.setEnabled(True)
+            self.play_button.setText("播放")
+        
         # 立即显示第一个节点
         if node_ids and len(node_ids) > 0:
             self.canvas.highlighted_nodes = [node_ids[0]]
             self.canvas.current_traversal_index = 0
-
             self.status_label.setText(f"搜索步骤: 1/{len(path)}")
-            
             # 强制重绘画布
             self.canvas.update()
             QApplication.processEvents()
+            # 自动开始播放
+            self._start_traversal_playback()
+        
+    def highlight_bst_insert_path(self, path, value):
+        """以遍历播放逻辑展示BST插入路径，并在动画结束后执行插入"""
+        data = self.canvas.data
+        node_ids = []
+        if data:
+            value_to_ids = {}
+            for node in data:
+                if 'value' in node and 'id' in node:
+                    value_to_ids.setdefault(node['value'], []).append(node['id'])
+            # 按路径顺序映射ID
+            counts = {}
+            for v in path:
+                idx = counts.get(v, 0)
+                if v in value_to_ids and idx < len(value_to_ids[v]):
+                    node_ids.append(value_to_ids[v][idx])
+                counts[v] = idx + 1
+        
+        self.canvas.stop_animation()
+        self.canvas.traversal_order = path
+        self.canvas.traversal_type = "bst_insert"
+        self.canvas.node_id_map = node_ids.copy()
+        self.canvas.current_traversal_index = -1
+        self.canvas.highlighted_nodes = []
+        self.status_label.setText(f"准备BST插入路径动画：值 {value}")
+        
+        # 设置后置操作：动画结束后执行插入
+        self.traversal_post_action = {
+            'action': 'insert',
+            'params': {'value': value, 'execute_only': True}
+        }
+        
+        # 播放控制
+        self.prev_step_button.setEnabled(True)
+        self.next_step_button.setEnabled(True)
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(True)
+            self.replay_button.setEnabled(True)
+            self.play_button.setText("播放")
+        
+        if node_ids:
+            self.canvas.highlighted_nodes = [node_ids[0]]
+            self.canvas.current_traversal_index = 0
+            self.status_label.setText(f"BST插入路径步骤: 1/{len(path)}")
+            self.canvas.update()
+            QApplication.processEvents()
+            self._start_traversal_playback()
+        
+    def highlight_bst_delete_path(self, path, value):
+        """以遍历播放逻辑展示BST删除路径，并在动画结束后执行删除"""
+        data = self.canvas.data
+        node_ids = []
+        if data:
+            value_to_ids = {}
+            for node in data:
+                if 'value' in node and 'id' in node:
+                    value_to_ids.setdefault(node['value'], []).append(node['id'])
+            counts = {}
+            for v in path:
+                idx = counts.get(v, 0)
+                if v in value_to_ids and idx < len(value_to_ids[v]):
+                    node_ids.append(value_to_ids[v][idx])
+                counts[v] = idx + 1
+        
+        self.canvas.stop_animation()
+        self.canvas.traversal_order = path
+        self.canvas.traversal_type = "bst_delete"
+        self.canvas.node_id_map = node_ids.copy()
+        self.canvas.current_traversal_index = -1
+        self.canvas.highlighted_nodes = []
+        self.status_label.setText(f"准备BST删除路径动画：值 {value}")
+        
+        # 设置后置操作：动画结束后执行删除
+        self.traversal_post_action = {
+            'action': 'delete',
+            'params': {'value': value, 'execute_only': True}
+        }
+        
+        self.prev_step_button.setEnabled(True)
+        self.next_step_button.setEnabled(True)
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(True)
+            self.replay_button.setEnabled(True)
+            self.play_button.setText("播放")
+        
+        if node_ids:
+            self.canvas.highlighted_nodes = [node_ids[0]]
+            self.canvas.current_traversal_index = 0
+            self.status_label.setText(f"BST删除路径步骤: 1/{len(path)}")
+            self.canvas.update()
+            QApplication.processEvents()
+            self._start_traversal_playback()
         
     def _prev_traversal_step(self):
         """处理上一步按钮点击事件"""
@@ -796,13 +945,29 @@ class TreeView(QWidget):
             
             # 检查是否完成遍历或搜索
             if self.canvas.current_traversal_index >= len(self.canvas.node_id_map) - 1:
-                # 动画完成，显示结果弹窗
+                # 若存在后置操作（如BST插入/删除），优先执行并跳过结果弹窗
+                if hasattr(self, 'traversal_post_action') and self.traversal_post_action:
+                    post = self.traversal_post_action
+                    self.traversal_post_action = None
+                    # 禁用遍历控制按钮并暂停播放
+                    self.prev_step_button.setEnabled(False)
+                    self.next_step_button.setEnabled(False)
+                    self._pause_traversal_playback()
+                    action_cn = {'insert': '插入', 'delete': '删除'}.get(post.get('action'), post.get('action'))
+                    self.status_label.setText(f"路径动画完成，执行{action_cn}操作…")
+                    try:
+                        self.operation_triggered.emit(post['action'], post.get('params', {}))
+                    except Exception:
+                        pass
+                    return
+                
+                # 动画完成，显示结果弹窗（仅针对标准搜索/遍历）
                 if self.canvas.traversal_type == "search":
                     # 搜索完成，判断是否找到目标节点
                     found = self.canvas.traversal_order[-1] == self.canvas.search_target if hasattr(self.canvas, 'search_target') else False
                     result = {'found': found, 'value': self.canvas.search_target if hasattr(self.canvas, 'search_target') else None}
                     self.show_result("search", result)
-                else:
+                elif self.canvas.traversal_type in {"preorder", "inorder", "postorder", "levelorder"}:
                     # 遍历完成，显示遍历结果
                     result = {'result': self.canvas.traversal_order}
                     self.show_result("traverse", result)
@@ -878,16 +1043,22 @@ class TreeView(QWidget):
         self.prev_step_button.setEnabled(True)
         self.next_step_button.setEnabled(True)
         
+        # 启用遍历播放控件（仿线性表）
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(True)
+            self.replay_button.setEnabled(True)
+            self.play_button.setText("播放")
+        
         # 立即显示第一个节点
         if node_ids and len(node_ids) > 0:
             self.canvas.highlighted_nodes = [node_ids[0]]
             self.canvas.current_traversal_index = 0
-
             self.status_label.setText(f"{traversal_name}遍历步骤: 1/{len(path)}")
-            
             # 强制重绘画布
             self.canvas.update()
             QApplication.processEvents()
+            # 自动开始播放
+            self._start_traversal_playback()
     
     def show_huffman_build_animation(self, build_steps):
         """显示哈夫曼树构建过程的动画
@@ -1272,24 +1443,7 @@ class TreeView(QWidget):
         # 显示当前步骤
         self._show_huffman_step(self.current_build_step)
     
-    def _animate_avl_build(self):
-        """AVL树构建动画处理函数"""
-        if not self.avl_build_steps:
-            self.avl_animation_timer.stop()
-            return
-        
-        # 移动到下一步
-        self.current_avl_step += 1
-        
-        # 检查是否完成动画
-        if self.current_avl_step >= len(self.avl_build_steps):
-            # 动画完成，停止定时器
-            self.avl_animation_timer.stop()
-            self.status_label.setText("AVL树构建动画完成")
-            return
-        
-        # 显示当前步骤
-        self._show_avl_step(self.current_avl_step)
+    # 已移除重复的 _animate_avl_build 定义（保留前文更健壮版本）
     
 
     
@@ -1533,6 +1687,27 @@ class TreeView(QWidget):
         
         if hasattr(self, 'status_label'):
             self.status_label.setText(f"AVL树构建步骤 1/{len(self.avl_build_steps)}")
+
+    def _animate_avl_build(self):
+        """AVL树构建动画处理函数"""
+        if not hasattr(self, 'avl_build_steps') or not self.avl_build_steps:
+            if hasattr(self, 'avl_animation_timer'):
+                self.avl_animation_timer.stop()
+            return
+
+        # 移动到下一步
+        self.current_avl_step += 1
+
+        # 检查是否完成动画
+        if self.current_avl_step >= len(self.avl_build_steps):
+            if hasattr(self, 'avl_animation_timer'):
+                self.avl_animation_timer.stop()
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("AVL树构建动画完成")
+            return
+
+        # 显示当前步骤
+        self._show_avl_step(self.current_avl_step)
     
     def start_avl_delete_animation(self):
         """开始AVL树删除动画"""
@@ -1703,6 +1878,77 @@ class TreeView(QWidget):
         if hasattr(self, 'avl_delete_steps'):
             self.avl_delete_steps = []
 
+    # —— 二叉树遍历播放控制（仿线性表）——
+    def _on_traversal_timer_tick(self):
+        """计时器推进遍历步骤"""
+        if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
+            self._pause_traversal_playback()
+            return
+        self._next_traversal_step()
+        # 若播放到末尾，自动暂停
+        if self.canvas.current_traversal_index >= len(self.canvas.node_id_map) - 1:
+            self._pause_traversal_playback()
+            self.status_label.setText("动画完成")
+
+    def _current_traversal_interval_ms(self):
+        """根据速度选择器计算播放间隔"""
+        try:
+            text = self.speed_combo.currentText() if hasattr(self, 'speed_combo') else "1x"
+            factor = 1.0
+            if text.endswith('x'):
+                factor = float(text[:-1])
+        except Exception:
+            factor = 1.0
+        self.traversal_play_speed_factor = factor
+        base = self.traversal_play_base_interval_ms
+        return int(base / max(0.25, factor))
+
+    def _start_traversal_playback(self):
+        """开始自动播放遍历"""
+        if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
+            return
+        self.traversal_is_playing = True
+        self.play_button.setText("暂停")
+        self.traversal_play_timer.start(self._current_traversal_interval_ms())
+        self.status_label.setText("播放中……")
+
+    def _pause_traversal_playback(self):
+        """暂停播放"""
+        if hasattr(self, 'traversal_play_timer') and self.traversal_play_timer.isActive():
+            self.traversal_play_timer.stop()
+        self.traversal_is_playing = False
+        if hasattr(self, 'play_button'):
+            self.play_button.setText("播放")
+
+    def _toggle_traversal_play(self):
+        """切换播放/暂停"""
+        if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
+            return
+        # 到达末尾则重播
+        if self.canvas.current_traversal_index >= len(self.canvas.node_id_map) - 1:
+            self._replay_traversal()
+            self._start_traversal_playback()
+            return
+        if self.traversal_is_playing:
+            self._pause_traversal_playback()
+        else:
+            self._start_traversal_playback()
+
+    def _replay_traversal(self):
+        """重置并展示第一步"""
+        self._pause_traversal_playback()
+        self.canvas.current_traversal_index = -1
+        self.canvas.highlighted_nodes = []
+        self.prev_step_button.setEnabled(True)
+        self.next_step_button.setEnabled(True)
+        # 立即显示第一步
+        self._next_traversal_step()
+
+    def _update_traversal_speed(self):
+        """更新速度设置"""
+        if self.traversal_is_playing:
+            self.traversal_play_timer.start(self._current_traversal_interval_ms())
+
 
 class TreeCanvas(QWidget):
     """树形结构可视化画布"""
@@ -1798,6 +2044,120 @@ class TreeCanvas(QWidget):
         
         # 触发重绘
         self.update()
+
+    def _find_tree_view(self):
+        parent = self.parent()
+        while parent is not None:
+            if hasattr(parent, 'operation_triggered'):
+                return parent
+            parent = parent.parent()
+        return None
+
+    def _get_parent_id(self, node):
+        # parent_id 可能为 0，不能直接用 or 合并
+        if 'parent_id' in node:
+            return node.get('parent_id')
+        return node.get('parent')
+
+    def _derive_path(self, target_node):
+        # 从可视化数据推导根到目标节点的路径（0/1 表示左/右）
+        if not self.data:
+            return []
+        id_map = {n.get('id'): n for n in self.data}
+
+        path_rev = []
+        current = target_node
+        while True:
+            parent_id = self._get_parent_id(current)
+            if parent_id is None:
+                break  # 到达根节点
+            parent = id_map.get(parent_id)
+            if parent is None:
+                break
+            # 找到父节点的子节点集合
+            children = []
+            for n in self.data:
+                pid = self._get_parent_id(n)
+                if pid == parent.get('id'):
+                    children.append(n)
+            direction = 0
+            if len(children) >= 2:
+                # 通过 x_pos 判断左右
+                left_child = min(children, key=lambda c: c.get('x_pos', 0.5))
+                direction = 0 if current.get('id') == left_child.get('id') else 1
+            else:
+                # 只有一个子节点时，与父节点 x_pos 比较
+                direction = 0 if current.get('x_pos', 0.5) < parent.get('x_pos', 0.5) else 1
+            path_rev.append(direction)
+            current = parent
+        return list(reversed(path_rev))
+
+    def mousePressEvent(self, event):
+        # 命中测试，检测是否点击到某个节点
+        if not self.data or len(self.data) == 0:
+            return
+
+        click_pos = event.pos()
+        start_y = 50
+        clicked = None
+        for node in self.data:
+            x = int(node.get('x_pos', 0.5) * self.width())
+            y = int(start_y + node.get('level', 0) * self.level_height)
+            dx = click_pos.x() - x
+            dy = click_pos.y() - y
+            if dx * dx + dy * dy <= self.node_radius * self.node_radius:
+                clicked = node
+                break
+
+        if not clicked:
+            return
+
+        # 目前仅对二叉树提供节点点击菜单
+        if self.structure_type != 'binary_tree':
+            return
+
+        path = self._derive_path(clicked)
+        tree_view = self._find_tree_view()
+        if not tree_view:
+            return
+
+        # 构建上下文菜单
+        menu = QMenu(self)
+        action_insert_left = menu.addAction('插入左子节点')
+        action_insert_right = menu.addAction('插入右子节点')
+        action_delete = menu.addAction('删除该节点')
+
+        chosen = menu.exec_(self.mapToGlobal(event.pos()))
+        if chosen is None:
+            return
+
+        try:
+            if chosen == action_insert_left:
+                value, ok = QInputDialog.getInt(self, '插入左子节点', '输入整数值:')
+                if ok:
+                    emit_data = {
+                        'structure_type': 'binary_tree',
+                        'value': value,
+                        'position': path + [0]
+                    }
+                    tree_view.operation_triggered.emit('insert', emit_data)
+            elif chosen == action_insert_right:
+                value, ok = QInputDialog.getInt(self, '插入右子节点', '输入整数值:')
+                if ok:
+                    emit_data = {
+                        'structure_type': 'binary_tree',
+                        'value': value,
+                        'position': path + [1]
+                    }
+                    tree_view.operation_triggered.emit('insert', emit_data)
+            elif chosen == action_delete:
+                emit_data = {
+                    'structure_type': 'binary_tree',
+                    'position': path
+                }
+                tree_view.operation_triggered.emit('delete', emit_data)
+        except Exception:
+            pass
     
     def _calculate_avl_node_positions(self, nodes):
         """计算AVL树节点的层级和水平位置
@@ -2021,34 +2381,9 @@ class TreeCanvas(QWidget):
             pass
             return
     
-    def start_avl_build_animation(self):
-        """开始AVL树构建动画"""
-        if not self.avl_build_steps:
-            return
-        
-        # 停止任何正在进行的动画
-        if self.avl_animation_timer.isActive():
-            self.avl_animation_timer.stop()
-        
-        # 初始化动画状态
-        self.current_avl_step = 0
-        
-        # 显示第一步
-        self._show_avl_step(0)
-        
-        # 启用上一步/下一步按钮
-        self.prev_step_button.setEnabled(False)  # 第一步不能再往前
-        self.next_step_button.setEnabled(True)
-        
-        self.status_label.setText(f"AVL树构建步骤 1/{len(self.avl_build_steps)}")
+    # 已移除重复的 start_avl_build_animation 定义（保留前文更健壮版本）
     
-    def stop_avl_animation(self):
-        """停止AVL树构建动画"""
-        if self.avl_animation_timer.isActive():
-            self.avl_animation_timer.stop()
-        
-        # 重置动画状态
-        self.current_avl_step = 0
+    # 已移除重复的 stop_avl_animation 定义（保留前文整合版本）
     
     def _animate_avl_build(self):
         """AVL树构建动画处理函数"""
@@ -2069,71 +2404,4 @@ class TreeCanvas(QWidget):
         # 显示当前步骤
         self._show_avl_step(self.current_avl_step)
     
-    def _show_avl_step(self, step_index):
-        """显示AVL树构建的特定步骤"""
-        if step_index >= len(self.avl_build_steps):
-            return
-        
-        step_data = self.avl_build_steps[step_index]
-        
-        # 更新状态标签
-        description = step_data.get('description', f'步骤 {step_index + 1}')
-        self.status_label.setText(f"步骤 {step_index + 1}/{len(self.avl_build_steps)}: {description}")
-        
-        # 准备可视化数据
-        visualization_data = {
-            'type': 'avl_tree',
-            'nodes': [],
-            'highlighted': step_data.get('highlight_nodes', [])
-        }
-        
-        # 根据步骤类型显示不同内容
-        action = step_data.get('action', 'unknown')
-        
-        if action == 'insert':
-            # 插入步骤：显示当前树状态
-            tree_data = step_data.get('tree_data')
-            if tree_data and tree_data.get('nodes'):
-                for node in tree_data['nodes']:
-                    visualization_data['nodes'].append({
-                        'id': node['id'],
-                        'value': str(node['value']),
-                        'level': node.get('level', 0),
-                        'x_pos': node.get('x_pos', 0.5),
-                        'parent_id': node.get('parent_id'),
-                        'height': node.get('height', 0),
-                        'balance_factor': node.get('balance_factor', 0)
-                    })
-        
-        elif action == 'rotate':
-            # 旋转步骤：显示旋转后的树状态
-            tree_data = step_data.get('tree_data')
-            if tree_data and tree_data.get('nodes'):
-                for node in tree_data['nodes']:
-                    visualization_data['nodes'].append({
-                        'id': node['id'],
-                        'value': str(node['value']),
-                        'level': node.get('level', 0),
-                        'x_pos': node.get('x_pos', 0.5),
-                        'parent_id': node.get('parent_id'),
-                        'height': node.get('height', 0),
-                        'balance_factor': node.get('balance_factor', 0)
-                    })
-        
-        elif action == 'complete':
-            # 完成步骤：显示最终的AVL树
-            tree_data = step_data.get('tree_data')
-            if tree_data and tree_data.get('nodes'):
-                for node in tree_data['nodes']:
-                    visualization_data['nodes'].append({
-                        'id': node['id'],
-                        'value': str(node['value']),
-                        'level': node.get('level', 0),
-                        'x_pos': node.get('x_pos', 0.5),
-                        'parent_id': node.get('parent_id'),
-                        'height': node.get('height', 0),
-                        'balance_factor': node.get('balance_factor', 0)
-                    })
-        
-        # 更新画布数据
-        self.canvas.update_data(visualization_data)
+    # 已移除重复的 _show_avl_step 定义（保留前文更健壮版本）

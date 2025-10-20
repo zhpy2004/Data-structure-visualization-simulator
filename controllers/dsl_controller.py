@@ -254,12 +254,13 @@ class DSLController(QObject):
             elif cmd_type == "delete":
                 structure_name = command.get("structure_name")
                 value = command.get("value")
+                position = command.get("position")
                 
                 # 转换结构类型
                 if structure_name == "binarytree":
                     structure_name = "binary_tree"
                 
-                result = self.tree_controller.remove_node(structure_name, value)
+                result = self.tree_controller.remove_node(structure_name, value, position)
                 self.command_result.emit("success", {
                     "message": f"成功从{structure_name}中删除值{value}",
                     "result": result

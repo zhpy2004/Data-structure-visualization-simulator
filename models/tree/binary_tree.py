@@ -29,7 +29,7 @@ class TreeNode:
         """
         self.data = data
         self.left = None   # 左子节点
-        self.right = None  # 右子节点
+        self.right = None  # 右子节点的引用，默认为None。
 
 
 class BinaryTree:
@@ -375,3 +375,89 @@ class BinaryTree:
         _traverse(self.root, 0, 0, 1)
         
         return positions
+    
+    def insert_at_path(self, value, path):
+        """按路径插入节点。
+        
+        Args:
+            value: 要插入的值
+            path: 由0/1组成的列表，0表示左，1表示右；空列表表示根位置
+        """
+        if path is None:
+            raise ValueError("必须提供路径列表")
+        if len(path) == 0:
+            if self.is_empty():
+                self.root = TreeNode(value)
+                self.size = 1
+                return
+            else:
+                raise ValueError("路径为空但根节点已存在")
+        if self.is_empty():
+            raise ValueError("路径无效：树为空且路径不为空")
+        # 遍历到目标位置的父节点
+        current = self.root
+        for direction in path[:-1]:
+            if direction not in (0, 1):
+                raise ValueError("路径值必须为0或1")
+            current = current.left if direction == 0 else current.right
+            if current is None:
+                raise ValueError("路径无效：中间节点不存在")
+        final_dir = path[-1]
+        if final_dir not in (0, 1):
+            raise ValueError("路径值必须为0或1")
+        target = current.left if final_dir == 0 else current.right
+        if target is not None:
+            raise ValueError("插入位置已被占用")
+        new_node = TreeNode(value)
+        if final_dir == 0:
+            current.left = new_node
+        else:
+            current.right = new_node
+        self.size += 1
+    
+    def _subtree_size(self, node):
+        if node is None:
+            return 0
+        return 1 + self._subtree_size(node.left) + self._subtree_size(node.right)
+    
+    def delete_at_path(self, path, expected_value=None):
+        """按路径删除节点（删除该节点及其子树）。
+        
+        Args:
+            path: 由0/1组成的列表；空列表表示删除根
+            expected_value: 如果提供，则要求目标节点值匹配
+        Returns:
+            bool: 删除是否成功
+        """
+        if path is None:
+            raise ValueError("必须提供路径列表")
+        if self.is_empty():
+            raise ValueError("当前树为空，无法删除")
+        if len(path) == 0:
+            if expected_value is not None and self.root.data != expected_value:
+                raise ValueError("目标值与根节点不匹配")
+            removed = self._subtree_size(self.root)
+            self.root = None
+            self.size = max(0, self.size - removed)
+            return True
+        # 遍历到目标位置
+        current = self.root
+        parent = None
+        for i, direction in enumerate(path):
+            if direction not in (0, 1):
+                raise ValueError("路径值必须为0或1")
+            parent = current
+            current = current.left if direction == 0 else current.right
+            if current is None:
+                raise ValueError("路径指向的节点不存在")
+        if expected_value is not None and current.data != expected_value:
+            raise ValueError("目标值与节点值不匹配")
+        removed = self._subtree_size(current)
+        # 断开父节点链接
+        last_dir = path[-1]
+        if last_dir == 0:
+            parent.left = None
+        else:
+            parent.right = None
+        self.size = max(0, self.size - removed)
+        return True

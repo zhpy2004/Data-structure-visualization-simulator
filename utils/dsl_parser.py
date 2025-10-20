@@ -217,7 +217,7 @@ class TreeDSLTransformer(Transformer):
     
     @v_args(inline=True)
     def traverse_cmd(self, traverse_type):
-        return ("traverse", {"type": str(traverse_type)})
+        return ("traverse", {"traverse_type": str(traverse_type)})
     
     @v_args(inline=True)
     def build_huffman_cmd(self, huffman_values):
@@ -292,51 +292,75 @@ def parse_tree_dsl(command_str):
         解析后的命令对象
     """
     try:
-        # 处理带有前缀的命令，如"tree.binary_tree.traverse preorder"
+        # 处理带有前缀的命令，如"tree.binary_tree.insert 5 at 0,1"
         if command_str.startswith("tree."):
             parts = command_str.split(".", 2)
             if len(parts) >= 3:
-                # 提取实际命令部分
-                structure_type = parts[1]  # 如"binary_tree"
-                command_part = parts[2]    # 如"traverse preorder"
+                structure_type = parts[1]  # 如 "binary_tree" / "bst" / "huffman"
+                command_part = parts[2].strip()
+                lower_cmd = command_part.lower()
                 
-                # 处理特殊命令
-                if command_part.startswith("traverse"):
-                    traverse_type = command_part.split(" ", 1)[1] if " " in command_part else ""
+                # traverse（不需要结构名）
+                if lower_cmd.startswith("traverse"):
+                    traverse_type = command_part.split(" ", 1)[1].strip() if " " in command_part else ""
                     return ("traverse", {
+                        "structure_name": structure_type,
                         "traverse_type": traverse_type
                     })
-                elif command_part.startswith("create"):
-                    # 处理create命令
-                    data_part = command_part.split(" ", 1)[1] if " " in command_part else ""
-                    data = [int(x.strip()) for x in data_part.split(",")] if data_part else []
+                # create：返回与 DSLController 兼容的键
+                elif lower_cmd.startswith("create"):
+                    data_part = command_part.split(" ", 1)[1].strip() if " " in command_part else ""
+                    values = [int(x.strip()) for x in data_part.split(",")] if data_part else []
                     return ("create", {
-                        "type": structure_type,
-                        "data": data
+                        "structure_type": structure_type,
+                        "values": values
                     })
-                elif command_part.startswith("insert"):
-                    # 处理insert命令
-                    value_part = command_part.split(" ", 1)[1] if " " in command_part else ""
-                    value = int(value_part) if value_part else 0
+                # insert：支持可选 at path
+                elif lower_cmd.startswith("insert"):
+                    # 格式：insert <num> [at <a,b,c>]
+                    m = re.match(r"insert\s+(\d+)(?:\s+at\s+([0-9,\s]+))?", command_part, re.IGNORECASE)
+                    if not m:
+                        return ("error", {"error": "无法解析 insert 命令"})
+                    value = int(m.group(1))
+                    pos = m.group(2)
+                    position = None
+                    if pos:
+                        position = [int(x.strip()) for x in pos.split(",") if x.strip() != ""]
                     return ("insert", {
-                        "value": value
+                        "structure_name": structure_type,
+                        "value": value,
+                        "position": position
                     })
-                elif command_part.startswith("search"):
-                    # 处理search命令
-                    value_part = command_part.split(" ", 1)[1] if " " in command_part else ""
-                    value = int(value_part) if value_part else 0
+                # search：需要结构名和值
+                elif lower_cmd.startswith("search"):
+                    m = re.match(r"search\s+(\d+)", command_part, re.IGNORECASE)
+                    if not m:
+                        return ("error", {"error": "无法解析 search 命令"})
+                    value = int(m.group(1))
                     return ("search", {
+                        "structure_name": structure_type,
                         "value": value
                     })
-                elif command_part.startswith("remove") or command_part.startswith("delete"):
-                    # 处理remove/delete命令
-                    value_part = command_part.split(" ", 1)[1] if " " in command_part else ""
-                    value = int(value_part) if value_part else 0
+                # delete/remove：支持可选 at path
+                elif lower_cmd.startswith("remove") or lower_cmd.startswith("delete"):
+                    m = re.match(r"(?:remove|delete)\s+(\d+)(?:\s+at\s+([0-9,\s]+))?", command_part, re.IGNORECASE)
+                    if not m:
+                        return ("error", {"error": "无法解析 delete 命令"})
+                    value = int(m.group(1))
+                    pos = m.group(2)
+                    position = None
+                    if pos:
+                        position = [int(x.strip()) for x in pos.split(",") if x.strip() != ""]
                     return ("delete", {
-                        "value": value
+                        "structure_name": structure_type,
+                        "value": value,
+                        "position": position
                     })
+                # clear：按结构名前缀清空
+                elif lower_cmd.startswith("clear"):
+                    return ("clear", {"structure_name": structure_type})
         
-        # 如果不是带前缀的命令，使用原有解析方式
+        # 如果不是带前缀的命令，使用原有解析方式（语法树）
         parser = Lark(TREE_DSL_GRAMMAR, parser='lalr')
         tree = parser.parse(command_str)
         transformer = TreeDSLTransformer()
@@ -370,8 +394,11 @@ def is_tree_command(command_str):
     Returns:
         是否为树形结构命令
     """
+    s = command_str.lower().strip()
+    if s.startswith("tree."):
+        return True
     tree_keywords = ["binarytree", "bst", "huffman", "preorder", "inorder", "postorder", "levelorder"]
-    return any(keyword in command_str.lower() for keyword in tree_keywords)
+    return any(keyword in s for keyword in tree_keywords)
 
 
 def parse_dsl_command(command_str):

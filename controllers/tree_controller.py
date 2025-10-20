@@ -38,10 +38,14 @@ class TreeController:
             self._create_structure(structure_type, values)
         elif action_type == 'insert':
             value = params.get('value')
-            self._insert_node(value)
+            position = params.get('position') if 'position' in params else params.get('path')
+            execute_only = bool(params.get('execute_only'))
+            self._insert_node(value, position, execute_only)
         elif action_type == 'delete' or action_type == 'remove':
             value = params.get('value')
-            self._delete_node(value)
+            position = params.get('position') if 'position' in params else params.get('path')
+            execute_only = bool(params.get('execute_only'))
+            self._delete_node(value, position, execute_only)
         elif action_type == 'search':
             value = params.get('value')
             self._search_node(value)
@@ -205,11 +209,13 @@ class TreeController:
         # 更新视图
         self._update_view()
     
-    def _insert_node(self, value):
-        """插入节点
+    def _insert_node(self, value, position=None, execute_only=False):
+        """插入节点（支持路径位置）
         
         Args:
             value: 节点值
+            position: 路径位置（列表），如二叉树为[0,1,...]
+            execute_only: 若为True，直接执行插入；否则先播放路径动画
         """
         if self.current_structure is None:
             self.view.show_message("错误", "请先创建数据结构")
@@ -225,18 +231,18 @@ class TreeController:
                 build_steps = self.current_structure.insert_with_steps(value)
                 # 显示AVL树插入动画，弹窗将在动画完成后显示
                 self.view.show_avl_build_animation(build_steps, value)
+            elif self.structure_type == 'bst' and not execute_only:
+                # BST：先播放插入路径动画，动画结束后再执行插入
+                found, path = self.current_structure.search(value)
+                self.view.highlight_bst_insert_path(path, value)
             else:
-                # 其他树类型使用标准插入方法
-                # 记录插入前的状态用于动画
+                # 其他树类型或执行阶段：直接插入
                 before_state = self.current_structure.get_visualization_data()
-                
-                # 执行插入操作
-                self.current_structure.insert(value)
-                
-                # 记录插入后的状态用于动画
+                if self.structure_type == 'binary_tree' and position:
+                    self.current_structure.insert_at_path(value, position)
+                else:
+                    self.current_structure.insert(value)
                 after_state = self.current_structure.get_visualization_data()
-                
-                # 更新视图，传入前后状态用于动画
                 self.view.update_visualization_with_animation(before_state, after_state, 'insert', value)
         except Exception as e:
             self.view.show_message("错误", f"插入失败: {str(e)}")
@@ -259,53 +265,87 @@ class TreeController:
         values.extend(self._get_tree_values(node.right))
         return values
     
-    def _delete_node(self, value):
+    def _delete_node(self, value, position=None, execute_only=False):
         """删除节点
         
         Args:
-            value: 节点值
+            value: 节点值（BST/AVL 按值删除；BinaryTree 可选用于校验）
+            position: 路径列表（仅 BinaryTree 支持，0=左，1=右）
+            execute_only: 若为True，直接执行删除；否则先播放路径动画
         """
         if self.current_structure is None:
             self.view.show_message("错误", "请先创建数据结构")
             return
 
-        if self.structure_type not in ['bst', 'avl_tree']:
+        # 支持的删除类型：binary_tree（按路径），bst / avl_tree（按值）
+        if self.structure_type not in ['binary_tree', 'bst', 'avl_tree']:
             self.view.show_message("错误", f"{self.structure_type}不支持删除操作")
             return
 
         try:
-            # 验证输入值
-            try:
-                value = int(value)
-            except (ValueError, TypeError):
-                self.view.show_message("错误", "请输入有效的整数值")
-                return
+            # 尝试解析数值（对 BinaryTree 不是必需）
+            parsed_value = None
+            if value is not None:
+                try:
+                    parsed_value = int(value)
+                except (ValueError, TypeError):
+                    self.view.show_message("错误", "请输入有效的整数值")
+                    return
             
-            # 对于AVL树，使用删除动画
-            if self.structure_type == 'avl_tree':
-                # 使用delete_with_steps方法获取删除步骤
-                delete_steps = self.current_structure.delete_with_steps(value)
-                if delete_steps:
-                    # 显示删除动画，弹窗将在动画完成后显示
-                    self.view.show_avl_delete_animation(delete_steps, value)
-                else:
-                    self.view.show_message("提示", f"值 {value} 不存在，无法删除")
-            else:
-                # 对于BST，使用原有的删除方法
-                # 记录删除前的状态用于动画
+            if self.structure_type == 'binary_tree':
+                # 二叉树支持按路径删除
+                if position is None:
+                    self.view.show_message("错误", "二叉树删除需要提供路径（如 0,1,0）")
+                    return
+                if any(d not in (0, 1) for d in position):
+                    self.view.show_message("错误", "路径仅允许 0 或 1")
+                    return
+                
+                # 记录删除前的状态
                 before_state = self.current_structure.get_visualization_data()
                 
-                # 执行删除操作
-                success = self.current_structure.delete(value)
+                # 计算将要删除的节点值用于动画展示
+                node = self.current_structure.root
+                for d in position:
+                    node = node.left if d == 0 else node.right
+                    if node is None:
+                        self.view.show_message("错误", "路径指向的节点不存在")
+                        return
+                report_value = node.data
                 
+                # 执行按路径删除（可选校验值）
+                success = self.current_structure.delete_at_path(position, expected_value=parsed_value)
                 if success:
-                    # 记录删除后的状态用于动画
                     after_state = self.current_structure.get_visualization_data()
-                    
-                    # 更新视图，传入前后状态用于动画
-                    self.view.update_visualization_with_animation(before_state, after_state, 'delete', value)
+                    self.view.update_visualization_with_animation(before_state, after_state, 'delete', report_value)
                 else:
-                    self.view.show_message("提示", f"值 {value} 不存在，无法删除")
+                    self.view.show_message("提示", "删除失败：未知原因")
+            elif self.structure_type == 'avl_tree':
+                # AVL树：按值删除并播放删除动画
+                if parsed_value is None:
+                    self.view.show_message("错误", "AVL树删除需要提供整数值")
+                    return
+                delete_steps = self.current_structure.delete_with_steps(parsed_value)
+                if delete_steps:
+                    self.view.show_avl_delete_animation(delete_steps, parsed_value)
+                else:
+                    self.view.show_message("提示", f"值 {parsed_value} 不存在，无法删除")
+            else:
+                # BST：先播放删除路径动画，动画结束后执行删除
+                if parsed_value is None:
+                    self.view.show_message("错误", "BST删除需要提供整数值")
+                    return
+                if not execute_only:
+                    found, path = self.current_structure.search(parsed_value)
+                    self.view.highlight_bst_delete_path(path, parsed_value)
+                else:
+                    before_state = self.current_structure.get_visualization_data()
+                    success = self.current_structure.delete(parsed_value)
+                    if success:
+                        after_state = self.current_structure.get_visualization_data()
+                        self.view.update_visualization_with_animation(before_state, after_state, 'delete', parsed_value)
+                    else:
+                        self.view.show_message("提示", f"值 {parsed_value} 不存在，无法删除")
                     
         except Exception as e:
             self.view.show_message("错误", f"删除失败: {str(e)}")
@@ -506,3 +546,73 @@ class TreeController:
             # 注意：遍历结果将在动画结束后由视图类显示
         except Exception as e:
             self.view.show_message("错误", f"遍历失败: {str(e)}")
+
+    def insert_node(self, structure_name, value, position=None):
+        """公共封装：面向DSL的插入接口。
+        Args:
+            structure_name (str): 结构名，如 'binarytree'/'binary_tree'
+            value (int): 节点值
+            position (list[int]|None): 路径，如 [0,1,0]
+        """
+        return self.handle_action('insert', {
+            'structure_name': structure_name,
+            'value': value,
+            'position': position,
+        })
+
+    def remove_node(self, structure_name, value=None, position=None):
+        """公共封装：面向DSL的删除接口。
+        支持按路径删除（binary_tree），或按值删除（BST/AVL）。
+        Args:
+            structure_name (str): 结构名
+            value (int|None): 对BST/AVL有意义；对binary_tree可为None或用于校验
+            position (list[int]|None): 路径
+        """
+        return self.handle_action('delete', {
+            'structure_name': structure_name,
+            'value': value,
+            'position': position,
+        })
+
+    def create_structure(self, structure_type, values=None):
+        """公共封装：创建树形结构。
+        Args:
+            structure_type (str): 'binary_tree' | 'bst' | 'huffman_tree' | 'avl_tree'
+            values (list|dict|None): 初始数据
+        """
+        return self.handle_action('create', {
+            'structure_type': structure_type,
+            'values': values or [],
+        })
+
+    def search_node(self, structure_name, value):
+        """公共封装：搜索节点。"""
+        return self.handle_action('search', {
+            'structure_name': structure_name,
+            'value': value,
+        })
+
+    def traverse_tree(self, structure_name, traverse_type):
+        """公共封装：遍历树结构。"""
+        return self.handle_action('traverse', {
+            'structure_name': structure_name,
+            'traverse_type': traverse_type,
+        })
+
+    def clear_structure(self, structure_name):
+        """公共封装：清空当前结构。"""
+        return self.handle_action('clear', {
+            'structure_name': structure_name,
+        })
+
+    def encode_text(self, text):
+        """公共封装：哈夫曼编码文本。"""
+        return self.handle_action('encode', {
+            'text': text,
+        })
+
+    def decode_text(self, binary):
+        """公共封装：哈夫曼解码二进制。"""
+        return self.handle_action('decode', {
+            'binary': binary,
+        })

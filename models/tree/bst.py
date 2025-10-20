@@ -268,51 +268,34 @@ class BST:
         return max(left_height, right_height) + 1
         
     def _calculate_node_positions(self):
-        """计算每个节点的层级和水平位置
+        """计算每个节点的位置信息，使其与二叉树一致
         
         Returns:
-            dict: 节点到其位置信息的映射
+            dict: 节点到位置信息的映射
         """
         if self.is_empty():
             return {}
-            
-        # 节点位置信息: {node: {'level': level, 'x_pos': x_pos}}
+        
         positions = {}
         
-        # 计算树的总宽度
-        width = 2 ** self.height() - 1
-        
-        # 递归计算每个节点的位置
-        self._calculate_position(self.root, 0, 0, width, positions)
-        
-        return positions
-    
-    def _calculate_position(self, node, level, left, right, positions):
-        """递归计算节点位置
-        
-        Args:
-            node: 当前节点
-            level: 当前层级
-            left: 左边界
-            right: 右边界
-            positions: 位置信息字典
-        """
-        if node is None:
-            return
+        def _traverse(node, level, left, right):
+            if node is None:
+                return
             
-        # 计算当前节点的水平位置（0-1之间的相对位置）
-        mid = (left + right) / 2
-        x_pos = mid / max(1, right)  # 确保分母不为0，并且结果在0-1之间
+            # 二叉树使用的布局：在 [left, right] 区间的中点
+            x_pos = (left + right) / 2
+            positions[node] = {
+                'level': level,
+                'x_pos': x_pos
+            }
+            
+            mid = (left + right) / 2
+            _traverse(node.left, level + 1, left, mid)
+            _traverse(node.right, level + 1, mid, right)
         
-        # 存储位置信息
-        positions[node] = {
-            'level': level,
-            'x_pos': x_pos
-        }
-        
-        # 递归计算左右子树的位置
-        self._calculate_position(node.left, level + 1, left, mid - 1, positions)
-        self._calculate_position(node.right, level + 1, mid + 1, right, positions)
+        # 与二叉树相同，从区间 [0, 1] 开始
+        _traverse(self.root, 0, 0.0, 1.0)
+        return positions
     
     def clear(self):
         """清空二叉搜索树"""
