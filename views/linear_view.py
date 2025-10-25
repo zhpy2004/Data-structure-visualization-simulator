@@ -7,7 +7,7 @@
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
-                             QMessageBox, QSplitter, QFrame, QScrollArea)
+                             QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor
 
@@ -32,8 +32,35 @@ class LinearView(QWidget):
         """更新视图显示
         
         Args:
-            structure: 要显示的数据结构对象
+            structure: 要显示的数据结构对象或可视化数据
         """
+        # 当传入 None 时，清空画布并刷新
+        if structure is None:
+            if hasattr(self, 'canvas'):
+                self.canvas.update_data(None)
+                self.canvas.update()
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("已清空视图，请点击“新建”")
+            return
+        
+        # 支持直接传入结构对象或可视化数据字典
+        data = None
+        if isinstance(structure, dict):
+            data = structure
+        elif hasattr(structure, 'get_visualization_data'):
+            try:
+                data = structure.get_visualization_data()
+            except Exception:
+                data = None
+        
+        # 更新可视化
+        if data is not None:
+            self.update_visualization(data)
+        else:
+            if hasattr(self, 'canvas'):
+                self.canvas.update_data(None)
+                self.canvas.update()
+
         # 触发视图重绘
         if hasattr(self, 'visualization_area'):
             self.visualization_area.structure = structure
@@ -86,7 +113,7 @@ class LinearView(QWidget):
         # 创建新建数据结构按钮
         self.create_button = QPushButton("新建")
         structure_layout.addWidget(self.create_button)
-        
+
         # 创建清空按钮
         self.clear_button = QPushButton("清空")
         structure_layout.addWidget(self.clear_button)
@@ -119,6 +146,7 @@ class LinearView(QWidget):
         
         # 顺序表和链表操作按钮
         self.insert_button = QPushButton("插入")
+        self.insert_button.setEnabled(False)
         self.remove_button = QPushButton("删除")
         self.get_button = QPushButton("获取")
         buttons_layout.addWidget(self.insert_button)
@@ -261,8 +289,43 @@ class LinearView(QWidget):
             self.peek_button.hide()
             self.position_spin.setEnabled(True)
         
+        # 禁用插入按钮直到新建
+        self.insert_button.setEnabled(False)
         # 发射操作信号
         self.operation_triggered.emit("change_structure", {"structure_type": self.current_structure})
+        
+        # 清空当前视图与动画状态，避免旧步骤残留影响新类型
+        try:
+            # 停止播放
+            if hasattr(self, 'play_timer') and self.play_timer.isActive():
+                self.play_timer.stop()
+            self.is_playing = False if hasattr(self, 'is_playing') else False
+            
+            # 清空动画步骤与索引
+            if hasattr(self, 'animation_steps'):
+                self.animation_steps = []
+            if hasattr(self, 'current_step_index'):
+                self.current_step_index = -1
+            self._before_state = None if hasattr(self, '_before_state') else None
+            self._after_state = None if hasattr(self, '_after_state') else None
+            
+            # 禁用控制按钮并重置播放按钮文案
+            if hasattr(self, 'prev_step_button'):
+                self.prev_step_button.setEnabled(False)
+            if hasattr(self, 'next_step_button'):
+                self.next_step_button.setEnabled(False)
+            if hasattr(self, 'play_button'):
+                self.play_button.setEnabled(False)
+                self.play_button.setText("播放")
+            if hasattr(self, 'replay_button'):
+                self.replay_button.setEnabled(False)
+            
+            # 清空画布并重绘（update_view(None) 会由控制器触发，这里先本地清空）
+            if hasattr(self, 'canvas'):
+                self.canvas.update_data(None)
+                self.canvas.update()
+        except Exception:
+            pass
         
         # 更新状态
         self.status_label.setText(f"当前数据结构: {self.structure_combo.currentText()}")
@@ -282,14 +345,27 @@ class LinearView(QWidget):
                 QMessageBox.warning(self, "警告", "请输入有效的整数列表，例如：1,2,3")
                 return
         
+        # 若为顺序表，先设定容量（槽位数）
+        capacity = None
+        if structure_type == 'array_list':
+            cap, ok = QInputDialog.getInt(self, "设定大小", "请输入顺序表容量（槽位数）:", 10, 1, 10000)
+            if not ok:
+                return
+            capacity = cap
+        
         # 发射操作信号
         self.operation_triggered.emit("create", {
             "structure_type": structure_type,
-            "values": values
+            "values": values,
+            "capacity": capacity
         })
+        self.insert_button.setEnabled(True)
         
         # 更新状态
-        self.status_label.setText(f"已创建{self.structure_combo.currentText()}，初始数据: {values}")
+        if capacity is not None:
+            self.status_label.setText(f"已创建{self.structure_combo.currentText()}，容量: {capacity}，初始数据: {values}")
+        else:
+            self.status_label.setText(f"已创建{self.structure_combo.currentText()}，初始数据: {values}")
     
     def _clear_structure(self):
         """清空当前数据结构"""
@@ -387,6 +463,27 @@ class LinearView(QWidget):
         Args:
             data: 可视化数据
         """
+        # 在非动画更新时，重置高亮与播放状态，避免残留效果
+        if hasattr(self, 'canvas'):
+            self.canvas.highlighted_index = None
+        if hasattr(self, 'play_timer') and self.play_timer.isActive():
+            self.play_timer.stop()
+        if hasattr(self, 'is_playing'):
+            self.is_playing = False
+        if hasattr(self, 'animation_steps'):
+            self.animation_steps = []
+        if hasattr(self, 'current_step_index'):
+            self.current_step_index = -1
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(False)
+            self.play_button.setText('播放')
+        if hasattr(self, 'replay_button'):
+            self.replay_button.setEnabled(False)
+        if hasattr(self, 'prev_step_button'):
+            self.prev_step_button.setEnabled(False)
+        if hasattr(self, 'next_step_button'):
+            self.next_step_button.setEnabled(False)
+        
         # 更新画布数据
         self.canvas.update_data(data)
         
@@ -829,7 +926,8 @@ class LinearView(QWidget):
             self.next_step_button.setEnabled(True)
             if self.current_step_index == 0:
                 self.prev_step_button.setEnabled(False)
-    
+
+
 
 
     def _next_step(self):
@@ -901,7 +999,7 @@ class LinearCanvas(QWidget):
     
     def _adjust_canvas_size(self):
         """根据数据量调整画布大小"""
-        if not self.data:
+        if not self.data and not (self.structure_type == "array_list" and self.capacity):
             return
             
         # 根据数据量计算所需宽度
@@ -910,8 +1008,9 @@ class LinearCanvas(QWidget):
             required_width = len(self.data) * 150 + 100
         else:
             # 其他线性结构
-            required_width = len(self.data) * 80 + 100
-            
+            total_slots = self.capacity if (self.structure_type == "array_list" and self.capacity) else len(self.data)
+            required_width = total_slots * 80 + 100
+        
         # 设置最小高度
         required_height = 300
         
@@ -925,8 +1024,8 @@ class LinearCanvas(QWidget):
         Args:
             event: 绘制事件
         """
-        # 确保有数据可绘制
-        if not self.data or len(self.data) == 0:
+        # 确保有数据可绘制（数组结构有容量时也应绘制空位）
+        if (self.structure_type != "array_list" or self.capacity is None) and (not self.data or len(self.data) == 0):
             # 绘制提示信息
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
@@ -971,13 +1070,16 @@ class LinearCanvas(QWidget):
         if self.capacity is not None and self.size is not None:
             painter.drawText(start_x + 120, start_y - 30, f"容量: {self.capacity}  大小: {self.size}")
         
+        # 计算应绘制的总槽位数（优先使用容量）
+        total_cells = self.capacity if self.capacity is not None else len(self.data)
+        
         # 绘制索引
-        for i in range(len(self.data)):
+        for i in range(total_cells):
             x = start_x + i * cell_width
             painter.drawText(x + 20, start_y - 10, str(i))
         
-        # 绘制单元格和值
-        for i, value in enumerate(self.data):
+        # 绘制单元格和值（为未赋值的槽位也绘制空格）
+        for i in range(total_cells):
             x = start_x + i * cell_width
             
             # 绘制单元格
@@ -990,6 +1092,7 @@ class LinearCanvas(QWidget):
             painter.drawRect(x, start_y, cell_width, cell_height)
             
             # 绘制值
+            value = self.data[i] if i < len(self.data) else None
             if value is None:
                 # 空位保留为空或显示占位
                 painter.setPen(QPen(QColor(150, 150, 150)))

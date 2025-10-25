@@ -372,3 +372,43 @@ class BST:
             'height': self.height(),
             'size': self.size
         }
+
+    # —— 新增：构建/插入步骤以支持BST构建动画 ——
+    def insert_with_steps(self, value):
+        """返回插入一个值的步骤列表（用于动画）"""
+        v = int(value)
+        steps = []
+        # 初始快照与待插入节点
+        steps.append({
+            "description": f"开始插入 {v}",
+            "pending_node": {"id": -1, "value": v},
+            "tree": self.get_visualization_data(),
+            "highlight_values": []
+        })
+        # 实际插入
+        before_root = self.root
+        self.insert(v)
+        # 插入后快照
+        snap = self.get_visualization_data()
+        steps.append({
+            "description": f"插入 {v} 完成",
+            "tree": snap,
+            "highlight_values": [v]
+        })
+        steps.append({"description": "插入完成", "tree": self.get_visualization_data()})
+        return steps
+
+    def build_with_steps(self, values):
+        """从值列表构建BST并记录每一步（用于动画）"""
+        values_list = list(values) if isinstance(values, (list, tuple)) else [values]
+        steps = [{
+            "description": f"初始化：准备插入值 {values_list}",
+            "tree": self.get_visualization_data(),
+        }]
+        # 重新开始构建
+        self.clear()
+        for v in values_list:
+            insert_steps = self.insert_with_steps(v)
+            steps.extend(insert_steps)
+        steps.append({"description": "BST构建完成", "tree": self.get_visualization_data()})
+        return steps

@@ -34,7 +34,8 @@ class LinearController:
         if action_type == 'create':
             structure_type = params.get('structure_type', params.get('type'))
             values = params.get('values', params.get('data', []))
-            self._create_structure(structure_type, values)
+            capacity = params.get('capacity')
+            self._create_structure(structure_type, values, capacity)
         elif action_type == 'insert':
             position = params.get('position', params.get('index'))
             value = params.get('value')
@@ -56,8 +57,12 @@ class LinearController:
             self._clear_structure()
         elif action_type == 'change_structure':
             structure_type = params.get('structure_type')
-            # 当切换数据结构类型时，清空当前结构并创建新的空结构
-            self._create_structure(structure_type, [])
+            # 切换结构类型后不自动新建，需用户点击“新建”
+            self.structure_type = structure_type
+            self.current_structure = None
+            if self.view:
+                self.view.update_view(None)
+                self.view.show_message("提示", "已切换结构类型，请点击“新建”创建数据结构")
         else:
             self.view.show_message("错误", f"未知操作类型: {action_type}")
             
@@ -117,12 +122,13 @@ class LinearController:
         except Exception as e:
             self.view.show_message("错误", f"DSL命令执行错误: {str(e)}")
     
-    def _create_structure(self, structure_type, initial_data=None):
+    def _create_structure(self, structure_type, initial_data=None, capacity=None):
         """创建线性结构
         
         Args:
             structure_type: 结构类型，'array_list', 'linked_list', 或 'stack'
             initial_data: 初始数据列表
+            capacity: 初始容量（仅顺序表使用）
         """
         if initial_data is None:
             initial_data = []
@@ -130,7 +136,9 @@ class LinearController:
         self.structure_type = structure_type
         
         if structure_type == 'array_list':
-            self.current_structure = ArrayList()
+            # 容量优先使用传入值，其次至少能容纳初始数据，默认10
+            cap_to_use = capacity if capacity is not None else max(len(initial_data), 10)
+            self.current_structure = ArrayList(capacity=cap_to_use)
             for item in initial_data:
                 self.current_structure.append(item)
         elif structure_type == 'linked_list':
@@ -341,7 +349,13 @@ class LinearController:
         try:
             # 清空当前结构
             self.current_structure.clear()
-            self._update_view()
+            
+            # 清空视图画布（避免保留旧绘制与高亮）
+            if hasattr(self.view, 'update_view'):
+                self.view.update_view(None)
+            else:
+                self._update_view()
+            
             self.view.show_message("成功", "数据结构已清空")
         except Exception as e:
             self.view.show_message("错误", f"清空失败: {str(e)}")

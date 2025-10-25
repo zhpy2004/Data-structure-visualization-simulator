@@ -58,6 +58,9 @@ class TreeController:
         elif action_type == 'build_avl':
             values = params.get('values')
             self._build_avl_tree(values)
+        elif action_type == 'build_bst':
+            values = params.get('values')
+            self._build_bst_tree(values)
         elif action_type == 'encode':
             text = params.get('text')
             self._encode_text(text)
@@ -68,8 +71,12 @@ class TreeController:
             self._clear_structure()
         elif action_type == 'change_structure':
             structure_type = params.get('structure_type')
-            # 当切换数据结构类型时，清空当前结构并创建新的空结构
-            self._create_structure(structure_type, [])
+            # 切换结构类型后不自动新建，需用户点击“新建”
+            self.structure_type = structure_type
+            self.current_structure = None
+            if self.view:
+                self.view.update_view(None)
+                self.view.show_message("提示", "已切换结构类型，请点击“新建”创建数据结构")
         elif action_type == 'save':
             # 保存当前数据结构
             return self.get_structure_data()
@@ -227,10 +234,9 @@ class TreeController:
         
         try:
             if self.structure_type == 'avl_tree':
-                # AVL树使用特殊的插入方法，生成动画步骤
+                # AVL树仅支持按值插入，不再提供按路径插入
                 build_steps = self.current_structure.insert_with_steps(value)
-                # 显示AVL树插入动画，弹窗将在动画完成后显示
-                self.view.show_avl_build_animation(build_steps, value)
+                self.view.show_avl_build_animation(build_steps)
             elif self.structure_type == 'bst' and not execute_only:
                 # BST：先播放插入路径动画，动画结束后再执行插入
                 found, path = self.current_structure.search(value)
@@ -321,9 +327,9 @@ class TreeController:
                 else:
                     self.view.show_message("提示", "删除失败：未知原因")
             elif self.structure_type == 'avl_tree':
-                # AVL树：按值删除并播放删除动画
+                # AVL树仅支持按值删除并播放旋转/重平衡动画，不再支持路径删除
                 if parsed_value is None:
-                    self.view.show_message("错误", "AVL树删除需要提供整数值")
+                    self.view.show_message("错误", "AVL树按值删除需要提供整数值")
                     return
                 delete_steps = self.current_structure.delete_with_steps(parsed_value)
                 if delete_steps:
@@ -360,13 +366,21 @@ class TreeController:
             self.view.show_message("错误", "请先创建数据结构")
             return
         
-        if self.structure_type not in ['bst']:
+        # 支持 BST 与 AVL 的搜索动画
+        if self.structure_type not in ['bst', 'avl_tree']:
             self.view.show_message("错误", f"{self.structure_type}不支持搜索操作")
             return
         
         try:
             # 执行搜索操作，获取搜索路径
             found, path = self.current_structure.search(value)
+            
+            # 确保画布持有最新快照（避免节点ID映射为空导致无动画）
+            if self.current_structure is not None and hasattr(self.view, 'update_view'):
+                try:
+                    self.view.update_view(self.current_structure)
+                except Exception:
+                    pass
             
             # 更新视图，显示搜索路径
             self.view.highlight_search_path(path, found, value)
@@ -424,6 +438,19 @@ class TreeController:
             self.view.show_avl_build_animation(build_steps)
         except Exception as e:
             self.view.show_message("错误", f"构建AVL树失败: {str(e)}")
+    
+    def _build_bst_tree(self, values):
+        """构建BST树（按值插入）并生成步骤动画"""
+        if not values:
+            self.view.show_message("错误", "请提供要插入的值")
+            return
+        try:
+            self.structure_type = 'bst'
+            self.current_structure = BST()
+            build_steps = self.current_structure.build_with_steps(values)
+            self.view.show_bst_build_animation(build_steps)
+        except Exception as e:
+            self.view.show_message("错误", f"构建BST树失败: {str(e)}")
     
     def _encode_text(self, text):
         """使用哈夫曼编码对文本进行编码
