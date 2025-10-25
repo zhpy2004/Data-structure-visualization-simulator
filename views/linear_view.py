@@ -9,7 +9,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
                              QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPainter, QPen, QColor
+from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath
+import math
 
 
 class LinearView(QWidget):
@@ -620,8 +621,9 @@ class LinearView(QWidget):
         # 获取值列表
         before_nodes = before_state.get('nodes', [])
         before_list = [n.get('data') for n in before_nodes]
-        after_nodes = after_state.get('nodes', [])
-        after_list = [n.get('data') for n in after_nodes] if after_nodes else before_list
+        # 修正：区分“空列表”与“缺失节点字段”，避免空列表被误判为未变化
+        after_nodes = after_state.get('nodes')
+        after_list = [n.get('data') for n in after_nodes] if (after_nodes is not None) else before_list
         size_before = before_state.get('size', len(before_list))
         size_after = after_state.get('size', len(after_list))
         
@@ -648,27 +650,46 @@ class LinearView(QWidget):
             return steps
         
         if operation_type == 'insert':
-            # 遍历到插入位置的前一个节点（头插除外）
+            # 1) 遍历到插入位置的前一个节点（头插除外）
             if index > 0:
                 append_traverse_steps(index - 1)
-            else:
+            elif size_before > 0:
                 # 头插：高亮头节点（如果存在）
-                if size_before > 0:
-                    steps.append({
-                        'struct': 'linked_list',
-                        'type': 'traverse',
-                        'index': 0,
-                        'display_data': before_list.copy(),
-                        'size': size_before
-                    })
-            # 插入显示
+                steps.append({
+                    'struct': 'linked_list',
+                    'type': 'traverse',
+                    'index': 0,
+                    'display_data': before_list.copy(),
+                    'size': size_before
+                })
+            # 2) 在下方显示插入节点（位于待插入两个节点的中间）
             steps.append({
                 'struct': 'linked_list',
-                'type': 'insert_value',
+                'type': 'insert_prepare',
                 'index': index,
-                'display_data': after_list.copy(),
-                'size': size_after
+                'display_data': before_list.copy(),
+                'size': size_before,
+                'insert_value': value
             })
+            # 3) 插入节点指向插入位置的下一个节点
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'insert_link_next',
+                'index': index,
+                'display_data': before_list.copy(),
+                'size': size_before,
+                'insert_value': value
+            })
+            # 4) 插入位置的前一个节点指向插入节点
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'insert_link_prev',
+                'index': index,
+                'display_data': before_list.copy(),
+                'size': size_before,
+                'insert_value': value
+            })
+            # 5) 显示最终结果
             steps.append({
                 'struct': 'linked_list',
                 'type': 'final',
@@ -679,28 +700,58 @@ class LinearView(QWidget):
             return steps
         
         if operation_type == 'delete':
-            # 遍历到删除位置的前一个节点（头删除外）
+            # 1) 遍历到删除位置的前一个节点（头删除外）
             if index > 0:
                 append_traverse_steps(index - 1)
-            # 高亮目标节点
+            # 2) 准备删除：高亮目标节点（保持原列表数据）
+            del_val = before_list[index] if 0 <= index < len(before_list) else None
             steps.append({
                 'struct': 'linked_list',
-                'type': 'highlight',
+                'type': 'delete_prepare',
                 'index': index,
                 'display_data': before_list.copy(),
-                'size': size_before
+                'size': size_before,
+                'delete_value': del_val
             })
-            # 删除后显示
-            temp = before_list.copy()
-            if 0 <= index < len(temp):
-                temp.pop(index)
+            # 头删：直接删除，不展示箭头重连步骤
+            if index == 0:
+                steps.append({
+                    'struct': 'linked_list',
+                    'type': 'final',
+                    'index': None,
+                    'display_data': after_list.copy(),
+                    'size': size_after
+                })
+                return steps
+            # 尾删：直接删除，不展示箭头重连步骤
+            if index == size_before - 1:
+                steps.append({
+                    'struct': 'linked_list',
+                    'type': 'final',
+                    'index': None,
+                    'display_data': after_list.copy(),
+                    'size': size_after
+                })
+                return steps
+            # 3) 断开并重连：前驱指向后继（斜线箭头，移除前驱→目标的水平箭头）
             steps.append({
                 'struct': 'linked_list',
-                'type': 'delete_value',
+                'type': 'delete_unlink_prev',
                 'index': index,
-                'display_data': temp,
-                'size': len(temp)
+                'display_data': before_list.copy(),
+                'size': size_before,
+                'delete_value': del_val
             })
+            # 4) 隔离待删除节点（可选步骤，保持列表未变化）
+            steps.append({
+                'struct': 'linked_list',
+                'type': 'delete_isolate',
+                'index': index,
+                'display_data': before_list.copy(),
+                'size': size_before,
+                'delete_value': del_val
+            })
+            # 5) 最终显示（实际移除节点）
             steps.append({
                 'struct': 'linked_list',
                 'type': 'final',
@@ -866,8 +917,11 @@ class LinearView(QWidget):
         if not step:
             return
         
-        # 设置高亮索引
-        self.canvas.highlighted_index = step.get('index')
+        # 设置高亮索引（移除插入动画中对后继节点的高亮）
+        if step.get('type') in ('insert_prepare','insert_link_next','insert_link_prev'):
+            self.canvas.highlighted_index = None
+        else:
+            self.canvas.highlighted_index = step.get('index')
         
         # 选择结构类型
         struct_type = step.get('struct', self._before_state.get('type') if self._before_state else 'array_list')
@@ -878,7 +932,17 @@ class LinearView(QWidget):
             viz = {
                 'type': 'linked_list',
                 'nodes': nodes,
-                'size': step.get('size')
+                'size': step.get('size'),
+                # 传递当前步骤类型与插入/删除辅助信息
+                'op_type': step.get('type'),
+                'aux_insert': {
+                    'value': step.get('insert_value'),
+                    'index': step.get('index')
+                } if step.get('type') in ('insert_prepare','insert_link_next','insert_link_prev') else None,
+                'aux_delete': {
+                    'value': step.get('delete_value'),
+                    'index': step.get('index')
+                } if step.get('type') in ('delete_prepare','delete_unlink_prev','delete_isolate') else None
             }
         elif struct_type == 'stack':
             viz = {
@@ -908,6 +972,12 @@ class LinearView(QWidget):
             self.status_label.setText("右移元素…")
         elif t == 'shift_left':
             self.status_label.setText("左移元素…")
+        elif t == 'insert_prepare':
+            self.status_label.setText("准备插入：放置新节点于下方")
+        elif t == 'insert_link_next':
+            self.status_label.setText("插入节点指向后继")
+        elif t == 'insert_link_prev':
+            self.status_label.setText("前驱节点指向插入节点")
         elif t == 'insert_value':
             self.status_label.setText("插入新元素…")
         elif t == 'delete_value':
@@ -962,6 +1032,17 @@ class LinearCanvas(QWidget):
         self.capacity = None
         self.size = None
         self.highlighted_index = None
+        # 链表插入/删除动画状态
+        self.step_type = None
+        self.linked_aux = None
+        # 持久插入箭头状态：在后续步骤保留直至最终
+        self.persist_next_arrow = False
+        self.persist_prev_arrow = False
+        self.persist_insert_index = None
+        # 持久删除箭头状态：前驱指向后继（跳过被删目标）
+        self.persist_delete_arrow = False
+        self.persist_delete_index = None
+        self.linked_aux_del = None
     
     def update_data(self, data):
         """更新数据
@@ -975,6 +1056,16 @@ class LinearCanvas(QWidget):
             self.capacity = None
             self.size = None
             self.highlighted_index = None
+            self.step_type = None
+            self.linked_aux = None
+            # 清除持久箭头状态
+            self.persist_next_arrow = False
+            self.persist_prev_arrow = False
+            self.persist_insert_index = None
+            # 清除删除持久箭头状态
+            self.persist_delete_arrow = False
+            self.persist_delete_index = None
+            self.linked_aux_del = None
             return
             
         self.structure_type = data.get("type")
@@ -984,12 +1075,48 @@ class LinearCanvas(QWidget):
         if self.structure_type == "linked_list":
             # 链表数据格式特殊处理
             self.data = [node.get("data") for node in data.get("nodes", [])]
+            # 读取当前步骤类型与辅助插入节点
+            self.step_type = data.get('op_type')
+            self.linked_aux = data.get('aux_insert')
+            self.linked_aux_del = data.get('aux_delete')
+            # 更新持久箭头状态（插入）
+            if self.step_type == 'insert_prepare' and self.linked_aux:
+                self.persist_next_arrow = False
+                self.persist_prev_arrow = False
+                self.persist_insert_index = self.linked_aux.get('index') if isinstance(self.linked_aux.get('index'), int) else None
+            elif self.step_type == 'insert_link_next' and self.linked_aux:
+                if self.persist_insert_index is None:
+                    self.persist_insert_index = self.linked_aux.get('index') if isinstance(self.linked_aux.get('index'), int) else None
+                self.persist_next_arrow = True
+            elif self.step_type == 'insert_link_prev':
+                self.persist_prev_arrow = True
+            # 更新持久箭头状态（删除）
+            if self.step_type == 'delete_prepare' and self.linked_aux_del:
+                self.persist_delete_arrow = False
+                self.persist_delete_index = self.linked_aux_del.get('index') if isinstance(self.linked_aux_del.get('index'), int) else None
+            elif self.step_type == 'delete_unlink_prev':
+                if self.persist_delete_index is None and self.linked_aux_del:
+                    self.persist_delete_index = self.linked_aux_del.get('index') if isinstance(self.linked_aux_del.get('index'), int) else None
+                self.persist_delete_arrow = True
+            elif self.step_type == 'delete_isolate':
+                # 保持前驱→后继斜线箭头
+                self.persist_delete_arrow = True
+            elif self.step_type == 'final':
+                self.persist_next_arrow = False
+                self.persist_prev_arrow = False
+                self.persist_insert_index = None
+                self.persist_delete_arrow = False
+                self.persist_delete_index = None
         else:
             # 其他线性结构处理
             self.data = data.get("elements", [])
             if not self.data:
                 # 尝试其他可能的键
                 self.data = data.get("data", [])
+            # 非链表步骤清除持久箭头状态
+            self.persist_next_arrow = False
+            self.persist_prev_arrow = False
+            self.persist_insert_index = None
         
         # 根据数据量调整画布大小
         self._adjust_canvas_size()
@@ -1011,8 +1138,8 @@ class LinearCanvas(QWidget):
             total_slots = self.capacity if (self.structure_type == "array_list" and self.capacity) else len(self.data)
             required_width = total_slots * 80 + 100
         
-        # 设置最小高度
-        required_height = 300
+        # 设置最小高度（栈随元素数量自适应高度）
+        required_height = (100 + len(self.data) * 40) if self.structure_type == "stack" else 300
         
         # 更新画布尺寸
         self.setMinimumSize(max(800, required_width), max(600, required_height))
@@ -1026,7 +1153,6 @@ class LinearCanvas(QWidget):
         """
         # 确保有数据可绘制（数组结构有容量时也应绘制空位）
         if (self.structure_type != "array_list" or self.capacity is None) and (not self.data or len(self.data) == 0):
-            # 绘制提示信息
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(QColor(100, 100, 100)))
@@ -1094,7 +1220,6 @@ class LinearCanvas(QWidget):
             # 绘制值
             value = self.data[i] if i < len(self.data) else None
             if value is None:
-                # 空位保留为空或显示占位
                 painter.setPen(QPen(QColor(150, 150, 150)))
                 painter.drawText(x + 20, start_y + 25, "")
             else:
@@ -1114,7 +1239,7 @@ class LinearCanvas(QWidget):
         # 计算节点尺寸
         node_width = 60
         node_height = 40
-        arrow_length = 30
+        arrow_length = 60
         start_x = 50
         start_y = 100
         
@@ -1144,63 +1269,189 @@ class LinearCanvas(QWidget):
             
             # 绘制箭头（除了最后一个节点）
             if i < len(self.data) - 1:
-                arrow_x = x + node_width
-                arrow_y = start_y + node_height // 2
-                
-                # 箭头线与头部
-                painter.setPen(QPen(QColor(66, 66, 66)))
-                painter.drawLine(arrow_x, arrow_y, arrow_x + arrow_length, arrow_y)
-                painter.drawLine(arrow_x + arrow_length - 10, arrow_y - 5, arrow_x + arrow_length, arrow_y)
-                painter.drawLine(arrow_x + arrow_length - 10, arrow_y + 5, arrow_x + arrow_length, arrow_y)
+                skip_arrow = False
+                # 插入阶段：在前驱指向插入节点步骤，移除前驱→后继的水平箭头
+                if self.step_type == 'insert_link_prev' and self.linked_aux and isinstance(self.linked_aux.get('index'), int):
+                    idx = self.linked_aux.get('index')
+                    prev_i = idx - 1 if idx > 0 else None
+                    if prev_i is not None and i == prev_i:
+                        skip_arrow = True
+                # 删除阶段：在重连及后续保留阶段，移除前驱→目标的水平箭头
+                if (not skip_arrow) and self.persist_delete_arrow and isinstance(self.persist_delete_index, int):
+                    prev_i_del = self.persist_delete_index - 1 if self.persist_delete_index > 0 else None
+                    if prev_i_del is not None and i == prev_i_del:
+                        skip_arrow = True
+                if not skip_arrow:
+                    arrow_x = x + node_width
+                    arrow_y = start_y + node_height // 2
+                    painter.setPen(QPen(QColor(66, 66, 66)))
+                    painter.drawLine(arrow_x, arrow_y, arrow_x + arrow_length, arrow_y)
+                    painter.drawLine(arrow_x + arrow_length - 10, arrow_y - 5, arrow_x + arrow_length, arrow_y)
+                    painter.drawLine(arrow_x + arrow_length - 10, arrow_y + 5, arrow_x + arrow_length, arrow_y)
         
         # 绘制最后一个节点的NULL指针
         if self.data:
             last_x = start_x + (len(self.data) - 1) * (node_width + arrow_length) + node_width
             last_y = start_y + node_height // 2
             painter.drawText(last_x + 10, last_y + 5, "NULL")
+        
+        # 插入动画的辅助节点绘制
+        if self.linked_aux and self.step_type in ('insert_prepare','insert_link_next','insert_link_prev'):
+            aux_value = self.linked_aux.get('value')
+            idx = self.linked_aux.get('index') if isinstance(self.linked_aux.get('index'), int) else 0
+            prev_i = idx - 1 if idx > 0 else None
+            next_i = idx if idx < len(self.data) else None
+            prev_x = start_x + prev_i * (node_width + arrow_length) if prev_i is not None else None
+            next_x = start_x + next_i * (node_width + arrow_length) if next_i is not None else None
+            if prev_x is not None and next_x is not None:
+                gap_center_x = prev_x + node_width + arrow_length / 2
+            elif prev_x is None and next_x is not None:
+                gap_center_x = next_x - arrow_length / 2
+            elif prev_x is not None and next_x is None:
+                gap_center_x = prev_x + node_width + arrow_length / 2
+            else:
+                gap_center_x = start_x + node_width / 2
+            x_aux = int(gap_center_x - node_width / 2)
+            y_aux = start_y + node_height + 60
+            painter.setPen(QPen(QColor(255, 152, 0), 2))
+            painter.setBrush(QColor(255, 224, 178))
+            painter.drawRect(x_aux, y_aux, node_width, node_height)
+            painter.drawText(x_aux + 15, y_aux + 25, str(aux_value))
+        
+        # 持久插入箭头：在后续步骤保留直至最终
+        if self.persist_insert_index is not None and (self.persist_next_arrow or self.persist_prev_arrow):
+            idx = self.persist_insert_index
+            prev_i = idx - 1 if idx > 0 else None
+            next_i = idx if idx < len(self.data) else None
+            prev_x = start_x + prev_i * (node_width + arrow_length) if prev_i is not None else None
+            next_x = start_x + next_i * (node_width + arrow_length) if next_i is not None else None
+            if prev_x is not None and next_x is not None:
+                gap_center_x = prev_x + node_width + arrow_length / 2
+            elif prev_x is None and next_x is not None:
+                gap_center_x = next_x - arrow_length / 2
+            elif prev_x is not None and next_x is None:
+                gap_center_x = prev_x + node_width + arrow_length / 2
+            else:
+                gap_center_x = start_x + node_width / 2
+            x_aux = int(gap_center_x - node_width / 2)
+            y_aux = start_y + node_height + 60
+            painter.setPen(QPen(QColor(66, 66, 66)))
+            # 保留：插入节点指向后继
+            if self.persist_next_arrow:
+                sx = x_aux + node_width // 2
+                sy = y_aux
+                if next_x is not None:
+                    ex = next_x + node_width // 2
+                    ey = start_y + node_height
+                else:
+                    ex = sx + arrow_length
+                    ey = sy - max(20, arrow_length // 2)
+                painter.drawLine(sx, sy, ex, ey)
+                angle = math.atan2(ey - sy, ex - sx)
+                ah = 10
+                ax1 = int(ex - ah * math.cos(angle - math.pi/6))
+                ay1 = int(ey - ah * math.sin(angle - math.pi/6))
+                ax2 = int(ex - ah * math.cos(angle + math.pi/6))
+                ay2 = int(ey - ah * math.sin(angle + math.pi/6))
+                painter.drawLine(ax1, ay1, ex, ey)
+                painter.drawLine(ax2, ay2, ex, ey)
+                if next_x is None:
+                    painter.drawText(ex + 5, ey - 5, "NULL")
+            # 保留：前驱指向插入节点
+            if self.persist_prev_arrow and prev_x is not None:
+                sx = prev_x + node_width // 2
+                sy = start_y + node_height
+                ex = x_aux + node_width // 2
+                ey = y_aux
+                painter.drawLine(sx, sy, ex, ey)
+                angle = math.atan2(ey - sy, ex - sx)
+                ah = 10
+                ax1 = int(ex - ah * math.cos(angle - math.pi/6))
+                ay1 = int(ey - ah * math.sin(angle - math.pi/6))
+                ax2 = int(ex - ah * math.cos(angle + math.pi/6))
+                ay2 = int(ey - ah * math.sin(angle + math.pi/6))
+                painter.drawLine(ax1, ay1, ex, ey)
+                painter.drawLine(ax2, ay2, ex, ey)
+        
+        # 持久删除箭头：前驱指向后继，跳过被删目标节点（向下弯圆弧，终点为后继底边中点）
+        if self.persist_delete_arrow and isinstance(self.persist_delete_index, int):
+            idx = self.persist_delete_index
+            prev_i = idx - 1 if idx > 0 else None
+            next_i = idx + 1 if (idx + 1) < len(self.data) else None
+            prev_x = start_x + prev_i * (node_width + arrow_length) if prev_i is not None else None
+            next_x = start_x + next_i * (node_width + arrow_length) if next_i is not None else None
+            if prev_x is not None:
+                sx = prev_x + node_width // 2
+                sy = start_y + node_height
+                if next_x is not None:
+                    ex = next_x + node_width // 2
+                    ey = start_y + node_height
+                else:
+                    ex = sx + arrow_length
+                    ey = sy - max(20, arrow_length // 2)
+                painter.setPen(QPen(QColor(66, 66, 66), 2))
+                path = QPainterPath()
+                path.moveTo(sx, sy)
+                mid_x = (sx + ex) / 2
+                arc_depth = max(50, arrow_length // 2)
+                ctrl_x = mid_x
+                ctrl_y = max(sy, ey) + arc_depth
+                path.quadTo(ctrl_x, ctrl_y, ex, ey)
+                painter.drawPath(path)
+                angle = math.atan2(ey - ctrl_y, ex - ctrl_x)
+                ah = 10
+                ax1 = int(ex - ah * math.cos(angle - math.pi/6))
+                ay1 = int(ey - ah * math.sin(angle - math.pi/6))
+                ax2 = int(ex - ah * math.cos(angle + math.pi/6))
+                ay2 = int(ey - ah * math.sin(angle + math.pi/6))
+                painter.drawLine(ax1, ay1, ex, ey)
+                painter.drawLine(ax2, ay2, ex, ey)
+                if next_x is None:
+                    painter.drawText(ex + 5, ey - 5, "NULL")
     
     def _draw_stack(self, painter):
-        """绘制栈
+                """绘制栈
+                
+                Args:
+                    painter: QPainter对象
+                """
+                # 设置字体
+                font = QFont("Arial", 12)
+                painter.setFont(font)
+                
+                # 计算单元格尺寸
+                cell_width = 100
+                cell_height = 40
+                margin_bottom = 60
+                # 底部居中：以栈单元宽度居中定位
+                start_x = (self.width() - cell_width) // 2
+                start_y = self.height() - margin_bottom - cell_height
+                
+                # 移除栈标题绘制
         
-        Args:
-            painter: QPainter对象
-        """
-        # 设置字体
-        font = QFont("Arial", 12)
-        painter.setFont(font)
-        
-        # 计算单元格尺寸
-        cell_width = 100
-        cell_height = 40
-        start_x = 150
-        start_y = 250
-        
-        # 绘制栈标题
-        painter.drawText(start_x, 50, "栈")
-        
-        # 绘制栈底和栈顶标记
-        if self.data:
-            # 栈底标签
-            painter.drawText(start_x - 80, start_y + 5, "栈底")
-            # 栈顶标签，避免单元素时与栈底重叠
-            top_label_y = start_y - (len(self.data) - 1) * cell_height + 5
-            if len(self.data) == 1:
-                top_label_y = start_y - cell_height + 5  # 上移到单元格顶部上方
-            painter.drawText(start_x - 80, top_label_y, "栈顶")
-        
-        # 绘制栈元素（从下往上）
-        for i, value in enumerate(self.data):
-            y = start_y - i * cell_height
-            
-            # 绘制单元格（支持高亮栈顶或指定索引）
-            if self.highlighted_index is not None and i == self.highlighted_index:
-                painter.setPen(QPen(QColor(255, 152, 0), 2))
-                painter.setBrush(QColor(255, 224, 178))
-            else:
-                painter.setPen(QPen(Qt.black, 2))
-                painter.setBrush(Qt.NoBrush)
-            painter.drawRect(start_x, y, cell_width, cell_height)
-            
-            # 绘制值
-            painter.setPen(QPen(Qt.black))
-            painter.drawText(start_x + 40, y + 25, str(value))
+                # 绘制栈底和栈顶标记
+                if self.data:
+                    # 栈底标签
+                    painter.drawText(start_x - 80, start_y + 5, "栈底")
+                    # 栈顶标签，避免单元素时与栈底重叠
+                    top_label_y = start_y - (len(self.data) - 1) * cell_height + 5
+                    if len(self.data) == 1:
+                        top_label_y = start_y - cell_height + 5  # 上移到单元格顶部上方
+                    painter.drawText(start_x - 80, top_label_y, "栈顶")
+                
+                # 绘制栈元素（从下往上）
+                for i, value in enumerate(self.data):
+                    y = start_y - i * cell_height
+                    
+                    # 绘制单元格（支持高亮栈顶或指定索引）
+                    if self.highlighted_index is not None and i == self.highlighted_index:
+                        painter.setPen(QPen(QColor(255, 152, 0), 2))
+                        painter.setBrush(QColor(255, 224, 178))
+                    else:
+                        painter.setPen(QPen(Qt.black, 2))
+                        painter.setBrush(Qt.NoBrush)
+                    painter.drawRect(start_x, y, cell_width, cell_height)
+                    
+                    # 绘制值
+                    painter.setPen(QPen(Qt.black))
+                    painter.drawText(start_x + 40, y + 25, str(value))
