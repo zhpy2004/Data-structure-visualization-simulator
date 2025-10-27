@@ -8,7 +8,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout,
                              QMessageBox, QSplitter, QFrame, QRadioButton, QButtonGroup,
-                             QScrollArea, QApplication, QMenu, QInputDialog)
+                             QScrollArea, QApplication, QMenu, QInputDialog, QTextEdit, QPlainTextEdit)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QBrush
 
@@ -18,6 +18,7 @@ class TreeView(QWidget):
     
     # 自定义信号
     operation_triggered = pyqtSignal(str, dict)  # 操作触发信号
+    dsl_command_triggered = pyqtSignal(str)  # DSL命令触发信号
     
     def update_view(self, structure):
         """更新视图显示
@@ -475,6 +476,35 @@ class TreeView(QWidget):
         
         # 添加控制布局到主布局
         main_layout.addLayout(control_layout)
+
+        # 新增：DSL控制台区域（合并输入与日志）
+        dsl_group = QGroupBox("DSL控制台")
+        dsl_layout = QVBoxLayout(dsl_group)
+        # 控制台日志输出
+        self.dsl_output = QPlainTextEdit()
+        self.dsl_output.setReadOnly(True)
+        if hasattr(self.dsl_output, 'setLineWrapMode'):
+            self.dsl_output.setLineWrapMode(QPlainTextEdit.NoWrap)
+        try:
+            self.dsl_output.setStyleSheet("background: white; color: black;")
+        except Exception:
+            pass
+        dsl_layout.addWidget(self.dsl_output)
+        # 输入行：单条命令，Enter 执行
+        input_bar = QHBoxLayout()
+        input_bar.addWidget(QLabel(">>>"))
+        self.dsl_input_line = QLineEdit()
+        if hasattr(self.dsl_input_line, 'setPlaceholderText'):
+            self.dsl_input_line.setPlaceholderText("输入DSL命令，例如: create bst with 1,2,3；多条指令用“;”分割")
+        input_bar.addWidget(self.dsl_input_line)
+        dsl_layout.addLayout(input_bar)
+        dsl_btns = QHBoxLayout()
+        self.dsl_execute_button = QPushButton("执行DSL")
+        self.dsl_clear_button = QPushButton("清空")
+        dsl_btns.addWidget(self.dsl_execute_button)
+        dsl_btns.addWidget(self.dsl_clear_button)
+        dsl_layout.addLayout(dsl_btns)
+        main_layout.addWidget(dsl_group)
         
         # 创建分隔线
         line = QFrame()
@@ -546,7 +576,126 @@ class TreeView(QWidget):
         self.avl_animation_timer.timeout.connect(self._animate_avl_build)
         # 连接BST动画定时器
         self.bst_animation_timer.timeout.connect(self._animate_bst_build)
+        
+        # 新增：连接DSL输入与按钮
+        self.dsl_execute_button.clicked.connect(self._execute_dsl_command)
+        self.dsl_clear_button.clicked.connect(self._clear_dsl_input)
+        if hasattr(self.dsl_input_line, 'returnPressed'):
+            self.dsl_input_line.returnPressed.connect(self._execute_dsl_command)
     
+    # 新增：DSL命令执行与输出方法
+    def _execute_dsl_command(self):
+        """执行当前视图中的DSL命令"""
+        cmd = self.dsl_input_line.text().strip()
+        if not cmd:
+            self.show_message("提示", "请输入DSL命令")
+            return
+        # 在控制台回显命令
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.appendPlainText(f">>> {cmd}")
+        # 发射 DSL 命令
+        self.dsl_command_triggered.emit(cmd)
+        # 清空输入框
+        self.dsl_input_line.clear()
+    
+    def _clear_dsl_input(self):
+        """清空DSL输入与控制台"""
+        self.dsl_input_line.clear()
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.clear()
+    
+    def append_dsl_output(self, message):
+        """在本视图的控制台追加消息"""
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.appendPlainText(message)
+
+    def set_structure_selection(self, structure_type):
+        """程序化切换结构类型至指定值且不触发视图的 change_structure 信号。
+
+        此方法用于在控制器发起构建/创建等动作时同步视图的结构类型选择，
+        保证当前页面与真实结构一致，同时避免触发视图的切换回调导致的清空与提示。
+        """
+        try:
+            # 计算目标索引
+            idx = -1
+            if hasattr(self, 'structure_combo'):
+                idx = self.structure_combo.findData(structure_type)
+            if idx is None:
+                idx = -1
+            # 更新 current_structure 与下拉框选择（静默，不发信号）
+            if idx != -1 and hasattr(self, 'structure_combo'):
+                if self.structure_combo.currentIndex() != idx:
+                    try:
+                        self.structure_combo.blockSignals(True)
+                        self.structure_combo.setCurrentIndex(idx)
+                        self.structure_combo.blockSignals(False)
+                    except Exception:
+                        # 兜底：若 blockSignals 出现异常，仍尽力设置索引
+                        self.structure_combo.setCurrentIndex(idx)
+                # 同步内部状态
+                self.current_structure = structure_type
+            else:
+                # 若找不到索引，至少同步内部状态，避免后续操作使用旧类型
+                self.current_structure = structure_type
+            # 应用 UI 状态（不发射 operation_triggered）
+            self._apply_structure_ui_state()
+        except Exception:
+            # 若出现异常，尽量不影响主流程
+            try:
+                self.current_structure = structure_type
+                self._apply_structure_ui_state()
+            except Exception:
+                pass
+
+    def _apply_structure_ui_state(self):
+        """根据当前结构类型更新本视图的按钮显隐与状态标签。
+
+        不发射任何操作信号，也不清空动画/遍历状态，仅负责 UI 呈现的一致性。
+        """
+        try:
+            if self.current_structure == "huffman_tree":
+                # 哈夫曼树特有操作
+                self.encode_button.show()
+                self.decode_button.show()
+                # 隐藏其他操作
+                self.insert_button.hide()
+                self.remove_button.hide()
+                self.search_button.hide()
+                self.traverse_button.hide()
+                self.traversal_box.hide()
+            elif self.current_structure == "binary_tree":
+                self.search_button.hide()
+                self.insert_button.show()
+                self.remove_button.show()
+                self.traverse_button.show()
+                self.encode_button.hide()
+                self.decode_button.hide()
+                self.traversal_box.show()
+            elif self.current_structure == "bst":
+                self.traverse_button.hide()
+                self.insert_button.show()
+                self.remove_button.show()
+                self.search_button.show()
+                self.encode_button.hide()
+                self.decode_button.hide()
+                self.traversal_box.hide()
+            elif self.current_structure == "avl_tree":
+                self.insert_button.show()
+                self.remove_button.show()
+                self.search_button.show()
+                self.traverse_button.hide()
+                self.traversal_box.hide()
+                self.encode_button.hide()
+                self.decode_button.hide()
+            # 更新状态标签
+            if hasattr(self, 'status_label') and hasattr(self, 'structure_combo'):
+                try:
+                    self.status_label.setText(f"当前数据结构: {self.structure_combo.currentText()}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _structure_changed(self, index):
         """数据结构类型改变处理
         
@@ -556,52 +705,8 @@ class TreeView(QWidget):
         # 获取选择的数据结构类型
         self.current_structure = self.structure_combo.itemData(index)
         
-        # 更新UI显示
-        if self.current_structure == "huffman_tree":
-            # 显示哈夫曼树特有操作按钮
-            self.encode_button.show()
-            self.decode_button.show()
-            # 隐藏哈夫曼树不需要的按钮
-            self.insert_button.hide()
-            self.remove_button.hide()
-            self.search_button.hide()
-            self.traverse_button.hide()
-            # 隐藏遍历方式选择框
-            self.traversal_box.hide()
-        elif self.current_structure == "binary_tree":
-            # 二叉树页面隐藏搜索按钮
-            self.search_button.hide()
-            # 显示其他按钮
-            self.insert_button.show()
-            self.remove_button.show()
-            self.traverse_button.show()
-            # 隐藏哈夫曼树特有操作按钮
-            self.encode_button.hide()
-            self.decode_button.hide()
-            # 显示遍历方式选择框
-            self.traversal_box.show()
-        elif self.current_structure == "bst":
-            # 二叉搜索树页面隐藏遍历按钮，显示搜索按钮
-            self.traverse_button.hide()
-            self.insert_button.show()
-            self.remove_button.show()
-            self.search_button.show()
-            # 隐藏哈夫曼树特有操作按钮
-            self.encode_button.hide()
-            self.decode_button.hide()
-            # 隐藏遍历方式选择框
-            self.traversal_box.hide()
-        elif self.current_structure == "avl_tree":
-            # AVL树页面显示基本操作按钮（显示搜索按钮，隐藏遍历相关界面）
-            self.insert_button.show()
-            self.remove_button.show()
-            self.search_button.show()
-            # 隐藏遍历相关界面
-            self.traverse_button.hide()
-            self.traversal_box.hide()
-            # 隐藏哈夫曼树特有操作按钮
-            self.encode_button.hide()
-            self.decode_button.hide()
+        # 更新UI显示（视图交互触发的切换完整重置）
+        self._apply_structure_ui_state()
         
         # 禁用插入按钮直到新建
         self.insert_button.setEnabled(False)
@@ -705,6 +810,12 @@ class TreeView(QWidget):
                 "structure_type": self.current_structure,
                 "values": values
             })
+            # 缓存最近一次新建的结构与值序列，供重播批量构建使用
+            try:
+                self.last_create_structure = self.current_structure
+                self.last_create_values = list(values) if isinstance(values, list) else []
+            except Exception:
+                pass
             # 新建后启用插入按钮
             self.insert_button.setEnabled(True)
             
@@ -724,14 +835,13 @@ class TreeView(QWidget):
                 })
                 # 然后开始AVL树构建动画
                 self.start_avl_build_animation()
-            # 如果是BST，自动开始构建动画
+            # 如果是BST，自动开始构建动画（改为多个插入动画）
             elif self.current_structure == "bst":
-                # 触发构建动画信号，生成构建步骤
+                # 触发构建动画信号：由控制器按“多个插入动画”逐个插入
                 self.operation_triggered.emit("build_bst", {
                     "values": values
                 })
-                # 然后开始BST构建动画
-                self.start_bst_build_animation()
+                # 不再直接启动旧的BST构建计时器，由控制器驱动插入路径动画
             
             # 更新状态
             self.status_label.setText(f"已创建{self.structure_combo.currentText()}")
@@ -2071,19 +2181,60 @@ class TreeView(QWidget):
                         'parent_id': node.get('parent_id')
                     })
             
-            # 添加队列中剩余的节点（显示在底部）
+            # 为队列中的内部节点准备其完整子树映射（来自 all_trees）
+            all_trees = step_data.get('all_trees', [])
+            subtrees_by_root_id = {}
+            try:
+                for t in all_trees:
+                    nodes = t.get('nodes', [])
+                    if not nodes:
+                        continue
+                    root_candidates = [n for n in nodes if n.get('parent_id') is None]
+                    if root_candidates:
+                        subtrees_by_root_id[root_candidates[0]['id']] = t
+            except Exception:
+                subtrees_by_root_id = {}
+            
+            # 添加队列中剩余的节点（显示在底部）。内部节点显示完整子树，叶子显示单节点
             queue_nodes = step_data.get('queue_nodes', [])
             max_level = max([node.get('level', 0) for node in visualization_data['nodes']], default=0)
+            queue_count = len(queue_nodes)
+            slot_width = 0.8 / (queue_count if queue_count > 0 else 1)
+            
             for i, node in enumerate(queue_nodes):
-                visualization_data['nodes'].append({
-                    'id': node['id'],
-                    'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
-                    'freq': node['freq'],
-                    'char': node['char'],
-                    'level': max_level + 2,  # 放在树的下方
-                    'x_pos': 0.1 + (0.8 * i / (len(queue_nodes) - 1 if len(queue_nodes) > 1 else 1)),
-                    'is_leaf': node.get('is_leaf', True)
-                })
+                slot_left = 0.1 + i * slot_width
+                # 内部节点：如果能找到对应子树，则在底部完整展示该子树
+                if node.get('char') is None and node.get('id') in subtrees_by_root_id:
+                    subtree = subtrees_by_root_id.get(node['id'])
+                    subtree_nodes = subtree.get('nodes', [])
+                    # 为队列子树重映射ID，避免与上方当前树或其他槽位冲突
+                    offset = 1000000 * (i + 1)
+                    id_remap = {n['id']: n['id'] + offset for n in subtree_nodes}
+                    for sn in subtree_nodes:
+                        rel_level = self._calculate_node_level(sn, subtree_nodes)
+                        rel_x = self._calculate_node_x_pos(sn, subtree_nodes)
+                        visualization_data['nodes'].append({
+                            'id': id_remap[sn['id']],
+                            'value': f"{sn['char']}:{sn['freq']}" if sn['char'] else f"内部:{sn['freq']}",
+                            'freq': sn['freq'],
+                            'char': sn['char'],
+                            'level': max_level + 2 + rel_level,
+                            'x_pos': slot_left + rel_x * slot_width,
+                            'is_leaf': sn.get('is_leaf', sn['char'] is not None),
+                            'parent_id': id_remap.get(sn.get('parent_id'))
+                        })
+                else:
+                    # 叶子或无法匹配子树的内部节点：按单节点显示在槽位中心
+                    center_x = slot_left + (slot_width / 2.0)
+                    visualization_data['nodes'].append({
+                        'id': node['id'],
+                        'value': f"{node['char']}:{node['freq']}" if node['char'] else f"内部:{node['freq']}",
+                        'freq': node['freq'],
+                        'char': node['char'],
+                        'level': max_level + 2,
+                        'x_pos': center_x,
+                        'is_leaf': node.get('is_leaf', True)
+                    })
         
         elif action == 'complete':
             # 完成步骤：显示最终的哈夫曼树
@@ -2656,6 +2807,24 @@ class TreeView(QWidget):
             if hasattr(self, 'play_button'):
                 self.play_button.setText("暂停")
             return
+
+        # 若最近一次新建为BST且缓存了值序列，则在“无路径且最近操作为新建/构建”时重触发批量构建
+        try:
+            recent_op = getattr(self, 'last_operation_type', None)
+            has_path = hasattr(self.canvas, 'node_id_map') and bool(self.canvas.node_id_map)
+            if (
+                not has_path and
+                (recent_op is None or recent_op in ('create', 'build_bst')) and
+                getattr(self, 'last_create_structure', None) == 'bst' and
+                getattr(self, 'last_create_values', [])
+            ):
+                # 触发控制器的构建流程（控制器会清空并逐个插入，视图负责播放路径动画）
+                self.operation_triggered.emit("build_bst", { "values": list(self.last_create_values) })
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText(f"重播：重新开始BST构建（{len(self.last_create_values)}个插入）")
+                return
+        except Exception:
+            pass
         
         # 若为AVL构建/删除动画，执行重播并返回（搜索场景优先用遍历重播）
         if getattr(self.canvas, 'traversal_type', None) != "search" and ((hasattr(self, 'avl_delete_steps') and self.avl_delete_steps) or (hasattr(self, 'avl_build_steps') and self.avl_build_steps)):
@@ -2672,20 +2841,152 @@ class TreeView(QWidget):
         # 停止可能的画布动画，避免冲突
         if hasattr(self.canvas, 'stop_animation'):
             self.canvas.stop_animation()
-        # 若没有可播放路径，直接返回（但若有前态则恢复预览）
+        # 若没有可播放路径，尝试基于最近一次操作的“前态”重建路径后自动播放
         if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
             if hasattr(self, 'last_operation_before_state') and self.last_operation_before_state:
                 try:
-                    self.replay_in_progress = True
-                    self.canvas.update_data(self.last_operation_before_state)
-                    op_cn = {"insert": "插入", "delete": "删除"}.get(getattr(self, 'last_operation_type', ''), getattr(self, 'last_operation_type', ''))
-                    val = getattr(self, 'last_operation_value', None)
-                    if val is not None:
-                        self.status_label.setText(f"重播：先显示{op_cn}前状态（值 {val}）")
+                    before = self.last_operation_before_state
+                    nodes = before.get('nodes', []) if isinstance(before, dict) else []
+                    op_type = getattr(self, 'last_operation_type', None)
+                    op_val = getattr(self, 'last_operation_value', None)
+                    # 仅针对BST插入/删除/搜索场景进行路径重建
+                    if nodes and op_type in ('insert', 'delete', 'search') and op_val is not None:
+                        # 用前态刷新画布
+                        self.replay_in_progress = True
+                        self.canvas.update_data(before)
+                        # 建映射
+                        id_to_node = {n.get('id'): n for n in nodes}
+                        children_map = {}
+                        for n in nodes:
+                            pid = n.get('parent_id') if 'parent_id' in n else n.get('parent')
+                            if pid is not None:
+                                children_map.setdefault(pid, []).append(n)
+                        # 找根
+                        root = None
+                        for n in nodes:
+                            pid = n.get('parent_id') if 'parent_id' in n else n.get('parent')
+                            if pid is None:
+                                root = n
+                                break
+                        path_ids = []
+                        path_vals = []
+                        def to_num(v):
+                            try:
+                                return float(v)
+                            except Exception:
+                                return None
+                        if root is not None:
+                            cur = root
+                            target_num = to_num(op_val)
+                            # BST/AVL路径：根据大小关系选择左右；二叉树搜索：层序遍历
+                            struct = before.get('type') if isinstance(before, dict) else None
+                            struct = struct or getattr(self, 'current_structure', None) or getattr(self.canvas, 'structure_type', None)
+                            if struct in ('bst', 'avl_tree'):
+                                while cur is not None:
+                                    path_ids.append(cur.get('id'))
+                                    path_vals.append(cur.get('value'))
+                                    cur_val_num = to_num(cur.get('value'))
+                                    if op_type in ('delete', 'search') and cur_val_num is not None and target_num is not None and target_num == cur_val_num:
+                                        # 到达目标，删除/搜索：重复一步以“定位”
+                                        path_ids.append(cur.get('id'))
+                                        break
+                                    # 选择左右子
+                                    left_node = None
+                                    right_node = None
+                                    for ch in children_map.get(cur.get('id'), []):
+                                        cv = to_num(ch.get('value'))
+                                        if cv is not None and cur_val_num is not None:
+                                            if cv < cur_val_num:
+                                                left_node = ch
+                                            else:
+                                                right_node = ch
+                                        else:
+                                            if ch.get('x_pos', 0.5) < cur.get('x_pos', 0.5):
+                                                left_node = ch
+                                            else:
+                                                right_node = ch
+                                    go_left = False
+                                    if target_num is not None and cur_val_num is not None:
+                                        go_left = target_num < cur_val_num
+                                    else:
+                                        go_left = (cur.get('x_pos', 0.5) > 0.5)
+                                    if go_left:
+                                        if left_node is not None:
+                                            cur = left_node
+                                        else:
+                                            if op_type == 'insert':
+                                                path_ids.append(path_ids[-1])
+                                            break
+                                    else:
+                                        if right_node is not None:
+                                            cur = right_node
+                                        else:
+                                            if op_type == 'insert':
+                                                path_ids.append(path_ids[-1])
+                                            break
+                            elif struct == 'binary_tree':
+                                # 层序遍历直到找到目标（若未找到则遍历完所有）
+                                from collections import deque
+                                q = deque()
+                                q.append(root)
+                                visited = set()
+                                while q:
+                                    node = q.popleft()
+                                    nid = node.get('id')
+                                    if nid in visited:
+                                        continue
+                                    visited.add(nid)
+                                    path_ids.append(nid)
+                                    path_vals.append(node.get('value'))
+                                    val_num = to_num(node.get('value'))
+                                    if op_type == 'search' and ((val_num is not None and target_num is not None and val_num == target_num) or node.get('value') == op_val):
+                                        # 命中目标：重复一步以定位
+                                        path_ids.append(nid)
+                                        break
+                                    for ch in children_map.get(nid, []):
+                                        q.append(ch)
+                        # 写入播放数据并自动开始
+                        if path_ids:
+                            if op_type == 'search':
+                                # 使用现有的搜索高亮入口以保证一致的初始化与自动播放
+                                found = False
+                                if path_vals:
+                                    last_val = path_vals[-1]
+                                    found = (str(last_val) == str(op_val))
+                                self.highlight_search_path(path_vals, found, search_value=op_val)
+                                return
+                            else:
+                                self.canvas.traversal_type = 'bst_insert' if op_type == 'insert' else 'bst_delete'
+                                self.canvas.traversal_order = path_vals
+                                self.canvas.node_id_map = path_ids
+                                self.canvas.current_traversal_index = -1
+                                self.canvas.highlighted_nodes = []
+                                self.prev_step_button.setEnabled(True)
+                                self.next_step_button.setEnabled(True)
+                                self.status_label.setText(
+                                    f"重播：已恢复{('插入' if op_type=='insert' else '删除')}前状态（值 {op_val}），随后自动播放"
+                                )
+                                # 展示第一步并开始播放
+                                self._next_traversal_step()
+                                self._start_traversal_playback()
+                                return
+                        else:
+                            # 无法重建路径时至少显示前态
+                            self.status_label.setText("重播：已恢复操作前状态，但无法重建路径")
+                            return
                     else:
-                        self.status_label.setText("重播：先显示操作前状态")
+                        # 非BST插入/删除或无节点数据：仅恢复前态
+                        self.replay_in_progress = True
+                        self.canvas.update_data(before)
+                        op_cn = {"insert": "插入", "delete": "删除"}.get(op_type, op_type)
+                        if op_val is not None:
+                            self.status_label.setText(f"重播：先显示{op_cn}前状态（值 {op_val}）")
+                        else:
+                            self.status_label.setText("重播：先显示操作前状态")
+                        return
                 except Exception:
                     pass
+            # 无前态：无法处理，直接返回
             return
         # 若当前是BST路径动画且有最近一次操作的前态，则先恢复并标记重播模式
         try:
@@ -3167,27 +3468,7 @@ class TreeCanvas(QWidget):
             pass
             return
     
-    # 已移除重复的 start_avl_build_animation 定义（保留前文更健壮版本）
-    
-    # 已移除重复的 stop_avl_animation 定义（保留前文整合版本）
-    
-    def _animate_avl_build(self):
-        """AVL树构建动画处理函数"""
-        if not self.avl_build_steps:
-            self.avl_animation_timer.stop()
-            return
-        
-        # 移动到下一步
-        self.current_avl_step += 1
-        
-        # 检查是否完成动画
-        if self.current_avl_step >= len(self.avl_build_steps):
-            # 动画完成，停止定时器
-            self.avl_animation_timer.stop()
-            self.status_label.setText("AVL树构建动画完成")
-            return
-        
-        # 显示当前步骤
-        self._show_avl_step(self.current_avl_step)
+    # 保留更健壮的 AVL 动画处理函数定义，删除重复的仅构建版本
+    # （定时器连接至前文的通用 _animate_avl_build，支持构建与删除两种步骤）
     
     # 已移除重复的 _show_avl_step 定义（保留前文更健壮版本）

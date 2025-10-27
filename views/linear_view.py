@@ -7,7 +7,7 @@
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
-                             QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog)
+                             QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog, QTextEdit, QPlainTextEdit)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath
 import math
@@ -18,6 +18,7 @@ class LinearView(QWidget):
     
     # 自定义信号
     operation_triggered = pyqtSignal(str, dict)  # 操作触发信号
+    dsl_command_triggered = pyqtSignal(str)  # DSL命令触发信号
     
     def show_message(self, title, message):
         """显示消息对话框
@@ -200,6 +201,36 @@ class LinearView(QWidget):
         # 添加控制布局到主布局
         main_layout.addLayout(control_layout)
         
+
+        # 创建DSL控制台区域（合并输入与日志）
+        dsl_group = QGroupBox("DSL控制台")
+        dsl_layout = QVBoxLayout(dsl_group)
+        # 日志输出（类似终端）
+        self.dsl_output = QPlainTextEdit()
+        self.dsl_output.setReadOnly(True)
+        if hasattr(self.dsl_output, 'setLineWrapMode'):
+            self.dsl_output.setLineWrapMode(QPlainTextEdit.NoWrap)
+        try:
+            self.dsl_output.setStyleSheet("background: white; color: black;")
+        except Exception:
+            pass
+        dsl_layout.addWidget(self.dsl_output)
+        # 输入行：单条命令，Enter 执行
+        input_bar = QHBoxLayout()
+        input_bar.addWidget(QLabel(">>>"))
+        self.dsl_input_line = QLineEdit()
+        if hasattr(self.dsl_input_line, 'setPlaceholderText'):
+            self.dsl_input_line.setPlaceholderText("输入DSL命令，按 Enter 执行；多条指令用“;”分割")
+        input_bar.addWidget(self.dsl_input_line)
+        dsl_layout.addLayout(input_bar)
+        dsl_btns = QHBoxLayout()
+        self.dsl_execute_button = QPushButton("执行DSL")
+        self.dsl_clear_button = QPushButton("清空")
+        dsl_btns.addWidget(self.dsl_execute_button)
+        dsl_btns.addWidget(self.dsl_clear_button)
+        dsl_layout.addLayout(dsl_btns)
+        main_layout.addWidget(dsl_group)
+        
         # 创建分隔线
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -260,7 +291,38 @@ class LinearView(QWidget):
         self.play_button.clicked.connect(self._toggle_play)
         self.replay_button.clicked.connect(self._replay)
         self.speed_combo.currentIndexChanged.connect(self._update_speed)
+        
+        # 新增：连接DSL输入与按钮
+        self.dsl_execute_button.clicked.connect(self._execute_dsl_command)
+        self.dsl_clear_button.clicked.connect(self._clear_dsl_input)
+        if hasattr(self.dsl_input_line, 'returnPressed'):
+            self.dsl_input_line.returnPressed.connect(self._execute_dsl_command)
     
+    def _execute_dsl_command(self):
+        """执行当前视图中的DSL命令"""
+        cmd = self.dsl_input_line.text().strip()
+        if not cmd:
+            self.show_message("提示", "请输入DSL命令")
+            return
+        # 在本视图的控制台回显命令
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.appendPlainText(f">>> {cmd}")
+        # 向外发射 DSL 命令
+        self.dsl_command_triggered.emit(cmd)
+        # 清空输入框
+        self.dsl_input_line.clear()
+    
+    def _clear_dsl_input(self):
+        """清空DSL输入与控制台"""
+        self.dsl_input_line.clear()
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.clear()
+    
+    def append_dsl_output(self, message):
+        """在本视图的控制台追加消息"""
+        if hasattr(self, 'dsl_output'):
+            self.dsl_output.appendPlainText(message)
+
     def _structure_changed(self, index):
         """数据结构类型改变处理
         
@@ -529,8 +591,13 @@ class LinearView(QWidget):
     def _build_array_animation_steps(self, before_state, after_state, operation_type, index, value):
         """构建顺序表动画步骤"""
         steps = []
-        before_list = before_state.get('data') or before_state.get('elements') or []
-        after_list = after_state.get('data') or after_state.get('elements') or before_list
+        # 兼容空列表：不要用 truthy 短路，否则 [] 会回退为 before_list
+        before_list = before_state.get('data') if ('data' in before_state) else (
+            before_state.get('elements') if ('elements' in before_state) else []
+        )
+        after_list = after_state.get('data') if ('data' in after_state) else (
+            after_state.get('elements') if ('elements' in after_state) else before_list
+        )
         before_size = before_state.get('size', len(before_list))
         after_size = after_state.get('size', len(after_list))
         before_capacity = before_state.get('capacity', max(before_size, len(before_list)))

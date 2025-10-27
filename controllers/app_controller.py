@@ -35,7 +35,10 @@ class AppController:
         # 连接主窗口的信号到控制器的槽函数
         self.main_window.linear_action_triggered.connect(self._handle_linear_action)
         self.main_window.tree_action_triggered.connect(self._handle_tree_action)
-        self.main_window.dsl_executed.connect(self._handle_dsl_command)
+        
+        # 连接视图级 DSL 命令信号
+        self.main_window.linear_view.dsl_command_triggered.connect(self._handle_dsl_command)
+        self.main_window.tree_view.dsl_command_triggered.connect(self._handle_dsl_command)
         
         # 连接保存和加载信号
         self.main_window.save_structure_requested.connect(self.save_structure)
@@ -54,8 +57,15 @@ class AppController:
     
     def _handle_dsl_command(self, command):
         """处理DSL命令"""
-        # 使用DSL控制器处理命令
-        result = self.dsl_controller.process_command(command)
+        # 设置上下文目标为当前选项卡
+        current_tab = self.main_window.tab_widget.currentIndex()
+        self.dsl_controller.set_context_target('linear' if current_tab == 0 else 'tree')
+        
+        # 使用DSL控制器处理命令或脚本
+        if ('\n' in command) or (';' in command):
+            result = self.dsl_controller.process_script(command)
+        else:
+            result = self.dsl_controller.process_command(command)
         
         # 如果处理失败，在DSL输出区域显示错误信息
         if not result:
@@ -67,23 +77,31 @@ class AppController:
         
         Args:
             result_type: 结果类型（success/error）
-            result_data: 结果数据
+            result_data: 结果数据，包含 message 和 target 用于路由
         """
-        if result_type == "error":
-            error_message = result_data.get("message", "未知错误")
-            # 在DSL输出区域显示错误信息
-            self.main_window.dsl_output.append(f"错误: {error_message}")
-            # 显示错误弹窗
-            QMessageBox.warning(self.main_window, "DSL解析错误", error_message)
+        target = result_data.get("target")
+        message = result_data.get("message", "")
+        # 根据目标类型选择视图，默认路由到当前选项卡
+        if target == "linear":
+            view = self.main_window.linear_view
+        elif target == "tree":
+            view = self.main_window.tree_view
         else:
-            # 处理成功结果
-            message = result_data.get("message", "")
+            current_tab = self.main_window.tab_widget.currentIndex()
+            view = self.main_window.linear_view if current_tab == 0 else self.main_window.tree_view
+        
+        if result_type == "error":
             if message:
-                self.main_window.dsl_output.append(f"成功: {message}")
+                view.append_dsl_output(f"错误: {message}")
+            QMessageBox.warning(self.main_window, "DSL错误", message or "未知错误")
+        else:
+            if message:
+                view.append_dsl_output(f"成功: {message}")
     
     def show_main_window(self):
-        """显示主窗口"""
-        self.main_window.show()
+        """显示主窗口（最大化）"""
+        # 改为最大化显示（保留标题栏与边框）
+        self.main_window.showMaximized()
         
     def save_structure(self):
         """保存当前数据结构到文件"""

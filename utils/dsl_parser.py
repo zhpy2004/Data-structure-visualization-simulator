@@ -18,18 +18,20 @@ LINEAR_DSL_GRAMMAR = r"""
            | get_cmd
            | push_cmd
            | pop_cmd
+           | peek_cmd
            | clear_cmd
     
-    create_cmd: "create" STRUCTURE_TYPE ["with" values]
+    create_cmd: "create" STRUCTURE_TYPE ["with" values] ["size" NUMBER]
     insert_cmd: "insert" value "at" position "in" STRUCTURE_NAME
     delete_cmd: "delete" delete_target "from" STRUCTURE_NAME
     get_cmd: "get" get_target "from" STRUCTURE_NAME
     push_cmd: "push" value "to" STRUCTURE_NAME
     pop_cmd: "pop" "from" STRUCTURE_NAME
+    peek_cmd: "peek" STRUCTURE_NAME
     clear_cmd: "clear" STRUCTURE_NAME
     
-    delete_target: value | "at" position
-    get_target: value | "at" position
+    delete_target: value | AT position
+    get_target: value | AT position
     
     values: value ("," value)*
     value: NUMBER
@@ -37,6 +39,7 @@ LINEAR_DSL_GRAMMAR = r"""
     
     STRUCTURE_TYPE: "arraylist" | "linkedlist" | "stack"
     STRUCTURE_NAME: "arraylist" | "linkedlist" | "stack"
+    AT: "at"
     
     %import common.NUMBER
     %import common.WS
@@ -53,6 +56,8 @@ TREE_DSL_GRAMMAR = r"""
            | search_cmd
            | traverse_cmd
            | build_huffman_cmd
+           | build_bst_cmd
+           | build_avl_cmd
            | encode_cmd
            | decode_cmd
            | clear_cmd
@@ -61,8 +66,10 @@ TREE_DSL_GRAMMAR = r"""
     insert_cmd: "insert" value ["at" position] "in" STRUCTURE_NAME
     delete_cmd: "delete" value ["at" position] "from" STRUCTURE_NAME
     search_cmd: "search" value "in" STRUCTURE_NAME
-    traverse_cmd: "traverse" TRAVERSE_TYPE
+    traverse_cmd: "traverse" TRAVERSE_TYPE ["in" STRUCTURE_NAME]
     build_huffman_cmd: "build" "huffman" "with" huffman_values
+    build_bst_cmd: "build" "bst" "with" values
+    build_avl_cmd: "build" "avl" "with" values
     encode_cmd: "encode" STRING "using" HUFFMAN_KEYWORD
     decode_cmd: "decode" BINARY "using" HUFFMAN_KEYWORD
     clear_cmd: "clear" STRUCTURE_NAME
@@ -74,8 +81,8 @@ TREE_DSL_GRAMMAR = r"""
     position: position_value ("," position_value)*
     position_value: NUMBER
     
-    STRUCTURE_TYPE: "binarytree" | "bst" | "huffman"
-    STRUCTURE_NAME: "binarytree" | "bst" | "huffman"
+    STRUCTURE_TYPE: "binarytree" | "bst" | "huffman" | "avl"
+    STRUCTURE_NAME: "binarytree" | "bst" | "huffman" | "avl"
     TRAVERSE_TYPE: "preorder" | "inorder" | "postorder" | "levelorder"
     HUFFMAN_KEYWORD: "huffman"
     CHAR: /[a-zA-Z0-9]/
@@ -102,10 +109,22 @@ class LinearDSLTransformer(Transformer):
         return cmd
     
     @v_args(inline=True)
-    def create_cmd(self, structure_type, values=None):
+    def create_cmd(self, structure_type, *rest):
+        values = []
+        capacity = None
+        for item in rest:
+            if isinstance(item, list):
+                values = item
+            else:
+                # 兼容 size NUMBER 的 Token，转为 int
+                try:
+                    capacity = int(item)
+                except Exception:
+                    pass
         return ("create", {
             "structure_type": str(structure_type),
-            "values": values if values else []
+            "values": values,
+            "capacity": capacity
         })
     
     @v_args(inline=True)
@@ -118,8 +137,21 @@ class LinearDSLTransformer(Transformer):
     
     @v_args(inline=True)
     def delete_cmd(self, target, structure_name):
+        # 为了避免下游误判，显式拆分 position/value 两种目标
+        pos = None
+        val = None
+        try:
+            if isinstance(target, dict):
+                if target.get("type") == "position":
+                    pos = target.get("value")
+                elif target.get("type") == "value":
+                    val = target.get("value")
+        except Exception:
+            pass
         return ("delete", {
             "target": target,
+            "position": pos,
+            "value": val,
             "structure_name": str(structure_name)
         })
     
@@ -132,17 +164,22 @@ class LinearDSLTransformer(Transformer):
     
     @v_args(inline=True)
     def delete_target(self, *args):
-        if len(args) == 2 and str(args[0]) == "at":
-            return {"type": "position", "value": args[1]}
-        else:
-            return {"type": "value", "value": args[0]}
+        # 显式检测 AT 令牌，避免将 "delete at X" 误判为按值删除
+        try:
+            if len(args) == 2 and hasattr(args[0], 'type') and str(getattr(args[0], 'type', '')) == 'AT':
+                return {"type": "position", "value": args[1]}
+        except Exception:
+            pass
+        return {"type": "value", "value": args[0]}
     
     @v_args(inline=True)
     def get_target(self, *args):
-        if len(args) == 2 and str(args[0]) == "at":
-            return {"type": "position", "value": args[1]}
-        else:
-            return {"type": "value", "value": args[0]}
+        try:
+            if len(args) == 2 and hasattr(args[0], 'type') and str(getattr(args[0], 'type', '')) == 'AT':
+                return {"type": "position", "value": args[1]}
+        except Exception:
+            pass
+        return {"type": "value", "value": args[0]}
     
     @v_args(inline=True)
     def push_cmd(self, value, structure_name):
@@ -154,6 +191,12 @@ class LinearDSLTransformer(Transformer):
     @v_args(inline=True)
     def pop_cmd(self, structure_name):
         return ("pop", {
+            "structure_name": str(structure_name)
+        })
+    
+    @v_args(inline=True)
+    def peek_cmd(self, structure_name):
+        return ("peek", {
             "structure_name": str(structure_name)
         })
     
@@ -216,12 +259,20 @@ class TreeDSLTransformer(Transformer):
         return ("search", {"value": value, "structure_name": str(structure_name)})
     
     @v_args(inline=True)
-    def traverse_cmd(self, traverse_type):
-        return ("traverse", {"traverse_type": str(traverse_type)})
+    def traverse_cmd(self, traverse_type, structure_name=None):
+        return ("traverse", {"traverse_type": str(traverse_type), "structure_name": str(structure_name) if structure_name else None})
     
     @v_args(inline=True)
     def build_huffman_cmd(self, huffman_values):
         return ("build_huffman", {"values": huffman_values})
+    
+    @v_args(inline=True)
+    def build_bst_cmd(self, values):
+        return ("build_bst", {"values": values})
+    
+    @v_args(inline=True)
+    def build_avl_cmd(self, values):
+        return ("build_avl", {"values": values})
     
     @v_args(inline=True)
     def encode_cmd(self, text, huffman_keyword):
@@ -302,6 +353,9 @@ def parse_tree_dsl(command_str):
                 
                 # traverse（不需要结构名）
                 if lower_cmd.startswith("traverse"):
+                    # 仅支持普通二叉树（binary_tree）
+                    if structure_type != "binary_tree":
+                        return ("error", {"error": "遍历命令仅支持普通二叉树（binarytree）"})
                     traverse_type = command_part.split(" ", 1)[1].strip() if " " in command_part else ""
                     return ("traverse", {
                         "structure_name": structure_type,
@@ -397,7 +451,7 @@ def is_tree_command(command_str):
     s = command_str.lower().strip()
     if s.startswith("tree."):
         return True
-    tree_keywords = ["binarytree", "bst", "huffman", "preorder", "inorder", "postorder", "levelorder"]
+    tree_keywords = ["binarytree", "bst", "huffman", "avl", "preorder", "inorder", "postorder", "levelorder", "traverse"]
     return any(keyword in s for keyword in tree_keywords)
 
 
@@ -410,6 +464,11 @@ def parse_dsl_command(command_str):
     Returns:
         解析后的命令对象和类型
     """
+    s = command_str.strip().lower()
+    # 全局清除：仅 "clear" 时不区分结构类型
+    if s == "clear":
+        return ("clear_all", {}), "global"
+    
     if is_linear_command(command_str):
         return parse_linear_dsl(command_str), "linear"
     elif is_tree_command(command_str):

@@ -22,7 +22,6 @@ class MainWindow(QMainWindow):
     # 自定义信号
     linear_action_triggered = pyqtSignal(str, dict)  # 线性结构操作信号
     tree_action_triggered = pyqtSignal(str, dict)    # 树形结构操作信号
-    dsl_executed = pyqtSignal(str)                   # DSL命令执行信号
     save_structure_requested = pyqtSignal()          # 保存数据结构信号
     load_structure_requested = pyqtSignal()          # 加载数据结构信号
     
@@ -69,39 +68,6 @@ class MainWindow(QMainWindow):
         tree_layout.addWidget(self.tree_view)
         self.tab_widget.addTab(tree_tab, "树形结构")
         
-        # 创建DSL命令选项卡
-        dsl_tab = QWidget()
-        dsl_layout = QVBoxLayout(dsl_tab)
-        
-        # DSL命令输入区域
-        dsl_input_group = QGroupBox("DSL命令输入")
-        dsl_input_layout = QVBoxLayout(dsl_input_group)
-        
-        self.dsl_input = QTextEdit()
-        self.dsl_input.setPlaceholderText("在此输入DSL命令...")
-        dsl_input_layout.addWidget(self.dsl_input)
-        
-        # 命令按钮区域
-        dsl_button_layout = QHBoxLayout()
-        self.execute_button = QPushButton("执行命令")
-        self.clear_button = QPushButton("清空")
-        dsl_button_layout.addWidget(self.execute_button)
-        dsl_button_layout.addWidget(self.clear_button)
-        dsl_input_layout.addLayout(dsl_button_layout)
-        
-        # DSL命令输出区域
-        dsl_output_group = QGroupBox("命令输出")
-        dsl_output_layout = QVBoxLayout(dsl_output_group)
-        
-        self.dsl_output = QTextEdit()
-        self.dsl_output.setReadOnly(True)
-        dsl_output_layout.addWidget(self.dsl_output)
-        
-        # 添加到DSL选项卡布局
-        dsl_layout.addWidget(dsl_input_group)
-        dsl_layout.addWidget(dsl_output_group)
-        
-        self.tab_widget.addTab(dsl_tab, "DSL命令")
         
         # 创建状态栏
         self.status_bar = QStatusBar()
@@ -194,10 +160,6 @@ class MainWindow(QMainWindow):
     
     def _connect_signals(self):
         """连接信号和槽"""
-        # 连接DSL命令按钮
-        self.execute_button.clicked.connect(self._execute_dsl_command)
-        self.clear_button.clicked.connect(self._clear_dsl_input)
-        
         # 连接选项卡切换信号
         self.tab_widget.currentChanged.connect(self._tab_changed)
         
@@ -227,22 +189,6 @@ class MainWindow(QMainWindow):
         # 发射树形操作信号
         self.tree_action_triggered.emit(operation, params)
     
-    def _execute_dsl_command(self):
-        """执行DSL命令"""
-        command = self.dsl_input.toPlainText().strip()
-        if not command:
-            self.show_message("请输入DSL命令")
-            return
-        
-        # 发射DSL命令执行信号
-        self.dsl_executed.emit(command)
-        
-        # 添加命令到输出区域
-        self.dsl_output.append(f">>> {command}")
-    
-    def _clear_dsl_input(self):
-        """清空DSL命令输入"""
-        self.dsl_input.clear()
     
     def _tab_changed(self, index):
         """选项卡切换处理
@@ -312,7 +258,3 @@ class MainWindow(QMainWindow):
             message: 要显示的消息
         """
         self.status_bar.showMessage(message, 3000)  # 显示3秒
-        
-        # 同时在DSL输出区域显示消息
-        if self.tab_widget.currentIndex() == 2:  # DSL选项卡
-            self.dsl_output.append(message)

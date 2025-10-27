@@ -171,6 +171,15 @@ class AVLTree:
             parent = None
             while n:
                 parent = n
+                # 重复值：忽略插入
+                if v == n.value:
+                    steps.append({
+                        "description": f"值 {v} 已存在，忽略插入",
+                        "highlight_nodes": [n.id],
+                        "tree": self._snapshot(),
+                    })
+                    steps.append({"description": "插入完成", "tree": self._snapshot()})
+                    return steps
                 if v < n.value:
                     n = n.left
                 else:

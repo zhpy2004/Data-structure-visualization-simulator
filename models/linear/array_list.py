@@ -136,10 +136,6 @@ class ArrayList:
         self.data[self.size - 1] = None
         self.size -= 1
         
-        # 如果元素数量减少到容量的1/4，缩小容量
-        if self.size > 0 and self.size == self.capacity // 4:
-            self._resize(self.capacity // 2)
-        
         return removed_value
     
     def index_of(self, value):

@@ -155,6 +155,13 @@ class LinearController:
         
         # 更新视图
         self._update_view()
+        
+        # 新建后启用插入按钮（与视图点击“新建”保持一致；DSL路径也适用）
+        try:
+            if hasattr(self.view, 'insert_button') and self.structure_type in ('array_list', 'linked_list'):
+                self.view.insert_button.setEnabled(True)
+        except Exception:
+            pass
     
     def _insert_element(self, index, value):
         """插入元素
