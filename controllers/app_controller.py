@@ -9,9 +9,11 @@ import json
 import pickle
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QFileDialog
 from views.main_window import MainWindow
+from utils.dsl_parser import parse_dsl_command
 from controllers.linear_controller import LinearController
 from controllers.tree_controller import TreeController
 from controllers.dsl_controller import DSLController
+from controllers.nl_controller import NLController
 
 
 class AppController:
@@ -26,6 +28,7 @@ class AppController:
         self.linear_controller = LinearController(self.main_window.linear_view)
         self.tree_controller = TreeController(self.main_window.tree_view)
         self.dsl_controller = DSLController(self.linear_controller, self.tree_controller)
+        self.nl_controller = NLController(self.dsl_controller)
         
         # 连接信号和槽
         self._connect_signals()
@@ -49,28 +52,121 @@ class AppController:
     
     def _handle_linear_action(self, action_type, params):
         """处理线性结构操作"""
+        # 切换到线性结构标签页
+        try:
+            self.main_window.tab_widget.setCurrentIndex(0)
+        except Exception:
+            pass
         self.linear_controller.handle_action(action_type, params)
-    
+
     def _handle_tree_action(self, action_type, params):
         """处理树形结构操作"""
+        # 切换到树形结构标签页
+        try:
+            self.main_window.tab_widget.setCurrentIndex(1)
+        except Exception:
+            pass
         self.tree_controller.handle_action(action_type, params)
     
     def _handle_dsl_command(self, command):
         """处理DSL命令"""
-        # 设置上下文目标为当前选项卡
+        s = (command or '').strip()
+        # 新规则：默认自然语言；仅当以 DSL: 前缀开头时作为 DSL 直接执行
+        if s.lower().startswith('dsl:'):
+            # 去除 DSL: 前缀后按原有 DSL 路径执行
+            dsl_text = s.split(':', 1)[1].strip() if ':' in s else ''
+            # 预测命令类型并切换到对应标签页，同时设置上下文目标
+            predicted = None
+            try:
+                first = ''
+                if ('\n' in dsl_text) or (';' in dsl_text):
+                    parts = [x.strip() for x in dsl_text.replace('\n', ';').split(';') if x.strip()]
+                    first = parts[0] if parts else ''
+                else:
+                    first = dsl_text
+                if first:
+                    _, cmd_type = parse_dsl_command(first)
+                    predicted = cmd_type
+            except Exception:
+                predicted = None
+            if predicted == 'linear':
+                try:
+                    self.main_window.tab_widget.setCurrentIndex(0)
+                except Exception:
+                    pass
+                self.dsl_controller.set_context_target('linear')
+            elif predicted == 'tree':
+                try:
+                    self.main_window.tab_widget.setCurrentIndex(1)
+                except Exception:
+                    pass
+                self.dsl_controller.set_context_target('tree')
+            else:
+                current_tab = self.main_window.tab_widget.currentIndex()
+                self.dsl_controller.set_context_target('linear' if current_tab == 0 else 'tree')
+
+            if ('\n' in dsl_text) or (';' in dsl_text):
+                result = self.dsl_controller.process_script(dsl_text)
+            else:
+                result = self.dsl_controller.process_command(dsl_text)
+            if not result:
+                # 错误信息已通过信号传递
+                return
+            return
+
+        # 其余情况均作为自然语言处理（无前缀）
+        nl_text = s
+        # 根据当前选项卡设置上下文目标，先生成 DSL
         current_tab = self.main_window.tab_widget.currentIndex()
-        self.dsl_controller.set_context_target('linear' if current_tab == 0 else 'tree')
-        
-        # 使用DSL控制器处理命令或脚本
-        if ('\n' in command) or (';' in command):
-            result = self.dsl_controller.process_script(command)
+        context_target = 'linear' if current_tab == 0 else 'tree'
+        ok, dsl_text = self.nl_controller.handle_nl_command(nl_text, context_target=context_target)
+        view = self.main_window.linear_view if context_target == 'linear' else self.main_window.tree_view
+        if not ok or not dsl_text:
+            view.append_dsl_output('NL→DSL: 无法解析该自然语言，请尝试更明确的表达。')
+            return
+        # 预览生成的 DSL
+        view.append_dsl_output(f'NL→DSL 生成：\n{dsl_text}')
+        # 预测命令类型并切换到对应标签页，同时设置上下文目标
+        predicted = None
+        try:
+            first = ''
+            if ('\n' in dsl_text) or (';' in dsl_text):
+                parts = [x.strip() for x in dsl_text.replace('\n', ';').split(';') if x.strip()]
+                first = parts[0] if parts else ''
+            else:
+                first = dsl_text
+            if first:
+                _, cmd_type = parse_dsl_command(first)
+                predicted = cmd_type
+        except Exception:
+            predicted = None
+        if predicted == 'linear':
+            try:
+                self.main_window.tab_widget.setCurrentIndex(0)
+            except Exception:
+                pass
+            self.dsl_controller.set_context_target('linear')
+        elif predicted == 'tree':
+            try:
+                self.main_window.tab_widget.setCurrentIndex(1)
+            except Exception:
+                pass
+            self.dsl_controller.set_context_target('tree')
         else:
-            result = self.dsl_controller.process_command(command)
-        
-        # 如果处理失败，在DSL输出区域显示错误信息
+            current_tab = self.main_window.tab_widget.currentIndex()
+            self.dsl_controller.set_context_target('linear' if current_tab == 0 else 'tree')
+        # 将生成的 DSL 交由 DSLController 执行
+        if ('\n' in dsl_text) or (';' in dsl_text):
+            result = self.dsl_controller.process_script(dsl_text)
+        else:
+            result = self.dsl_controller.process_command(dsl_text)
         if not result:
-            # 错误信息已通过信号传递，不需要在这里处理
-            pass
+            # 错误信息已通过信号传递
+            return
+        return
+
+        # 旧路径不再使用：这里的逻辑由上面的 DSL: 分支与 NL 分支覆盖
+        return
     
     def _handle_dsl_result(self, result_type, result_data):
         """处理DSL命令结果
@@ -81,6 +177,14 @@ class AppController:
         """
         target = result_data.get("target")
         message = result_data.get("message", "")
+        # 根据目标类型自动切换标签页
+        try:
+            if target == "linear":
+                self.main_window.tab_widget.setCurrentIndex(0)
+            elif target == "tree":
+                self.main_window.tab_widget.setCurrentIndex(1)
+        except Exception:
+            pass
         # 根据目标类型选择视图，默认路由到当前选项卡
         if target == "linear":
             view = self.main_window.linear_view

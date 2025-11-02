@@ -5,7 +5,7 @@
 DSL控制器 - 用于处理DSL命令并连接UI与数据结构模型
 """
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from models.tree.bst import BST
 from models.tree.avl_tree import AVLTree
 from models.tree.binary_tree import BinaryTree
@@ -32,6 +32,14 @@ class DSLController(QObject):
         self.tree_controller = tree_controller
         # 上下文目标：根据当前选项卡过滤命令类型（'linear' 或 'tree'）
         self.context_target = None
+        # —— 脚本执行的异步队列与轮询 ——
+        self._script_running = False
+        self._script_pending_commands = []
+        self._script_success_count = 0
+        self._script_fail_count = 0
+        self._script_timer = QTimer(self)
+        self._script_timer.setInterval(100)
+        self._script_timer.timeout.connect(self._process_next_script_command)
     
     def set_context_target(self, target):
         """设置上下文目标，用于按当前选项卡筛选命令类型"""
@@ -114,7 +122,27 @@ class DSLController(QObject):
         }
         normalized = mapping.get(structure_name, structure_name)
 
-        # 若结构类型不同，仅切换类型，不自动创建
+        # 先联动视图下拉框，确保 UI 切换到对应页面
+        try:
+            view = getattr(self.linear_controller, 'view', None)
+            combo = getattr(view, 'structure_combo', None)
+            if combo is not None:
+                # 根据 itemData 查找匹配索引
+                target_index = None
+                for i in range(combo.count()):
+                    try:
+                        if combo.itemData(i) == normalized:
+                            target_index = i
+                            break
+                    except Exception:
+                        pass
+                if target_index is not None and combo.currentIndex() != target_index:
+                    combo.setCurrentIndex(target_index)  # 触发视图的 _structure_changed，从而切换按钮/状态
+        except Exception:
+            # 视图联动失败不影响后续逻辑
+            pass
+
+        # 若结构类型不同，仅切换类型（控制器状态），不自动创建
         if self.linear_controller.structure_type != normalized:
             self.linear_controller.handle_action('change_structure', {'structure_type': normalized})
 
@@ -151,6 +179,23 @@ class DSLController(QObject):
                     "stack": "stack"
                 }
                 normalized = mapping.get(structure_type, structure_type)
+                # 执行创建前，同步视图至目标类型页面，避免在错误页面上执行
+                try:
+                    view = getattr(self.linear_controller, 'view', None)
+                    combo = getattr(view, 'structure_combo', None)
+                    if combo is not None:
+                        target_index = None
+                        for i in range(combo.count()):
+                            try:
+                                if combo.itemData(i) == normalized:
+                                    target_index = i
+                                    break
+                            except Exception:
+                                pass
+                        if target_index is not None and combo.currentIndex() != target_index:
+                            combo.setCurrentIndex(target_index)
+                except Exception:
+                    pass
                 self.linear_controller.handle_action('create', {
                     'structure_type': normalized,
                     'values': values,
@@ -394,6 +439,23 @@ class DSLController(QObject):
                 prep = self._prepare_tree_structure(normalized)
                 if prep is None:
                     return False
+                # 若BST正在批量构建，插入动作入队，待构建完成后自动执行
+                if normalized == 'bst' and getattr(self.tree_controller, '_bst_build_in_progress', False):
+                    queued = False
+                    try:
+                        queued = self.tree_controller.queue_action_after_bst_build('insert', {
+                            'value': value,
+                            'position': position
+                        })
+                    except Exception:
+                        queued = False
+                    if queued:
+                        self.command_result.emit("success", {
+                            "message": f"BST构建中，已排队插入值{value}",
+                            "result": None,
+                            "target": "tree"
+                        })
+                        return True
                 # 未新建则报错
                 if self.tree_controller.current_tree is None:
                     self.command_result.emit("error", {
@@ -419,6 +481,23 @@ class DSLController(QObject):
                 prep = self._prepare_tree_structure(normalized)
                 if prep is None:
                     return False
+                # 若BST正在批量构建，删除动作入队
+                if normalized == 'bst' and getattr(self.tree_controller, '_bst_build_in_progress', False):
+                    queued = False
+                    try:
+                        queued = self.tree_controller.queue_action_after_bst_build('delete', {
+                            'value': value,
+                            'position': position
+                        })
+                    except Exception:
+                        queued = False
+                    if queued:
+                        self.command_result.emit("success", {
+                            "message": f"BST构建中，已排队删除值{value}",
+                            "result": None,
+                            "target": "tree"
+                        })
+                        return True
                 if self.tree_controller.current_tree is None:
                     self.command_result.emit("error", {
                         "message": "当前未新建树结构，请先执行 create 命令或点击“新建”",
@@ -442,6 +521,20 @@ class DSLController(QObject):
                 prep = self._prepare_tree_structure(normalized)
                 if prep is None:
                     return False
+                # 若BST正在批量构建，搜索动作入队
+                if normalized == 'bst' and getattr(self.tree_controller, '_bst_build_in_progress', False):
+                    queued = False
+                    try:
+                        queued = self.tree_controller.queue_action_after_bst_build('search', { 'value': value })
+                    except Exception:
+                        queued = False
+                    if queued:
+                        self.command_result.emit("success", {
+                            "message": f"BST构建中，已排队搜索值{value}",
+                            "result": None,
+                            "target": "tree"
+                        })
+                        return True
                 if self.tree_controller.current_tree is None:
                     self.command_result.emit("error", {
                         "message": "当前未新建树结构，请先执行 create 命令或点击“新建”",
@@ -631,7 +724,14 @@ class DSLController(QObject):
             return None
 
     def process_script(self, script_str):
-        """按脚本执行多条DSL命令（换行或分号分隔；支持#和//注释）"""
+        """按脚本执行多条DSL命令（换行或分号分隔；支持#和//注释），改为异步逐条执行，避免并发动画冲突"""
+        # 若已有脚本在执行，拒绝并提示
+        if self._script_running:
+            self.command_result.emit("error", {
+                "message": "已有脚本正在执行，请稍后再试",
+                "target": self.context_target
+            })
+            return False
         # 拆分为逐条命令
         lines = script_str.replace('\r\n', '\n').split('\n')
         commands = []
@@ -647,17 +747,69 @@ class DSLController(QObject):
                 "target": self.context_target
             })
             return False
-        success_count = 0
-        fail_count = 0
-        for cmd in commands:
+        # 初始化脚本异步状态
+        self._script_running = True
+        self._script_pending_commands = commands
+        self._script_success_count = 0
+        self._script_fail_count = 0
+        # 启动轮询并立即尝试处理首条命令
+        if not self._script_timer.isActive():
+            self._script_timer.start()
+        self._process_next_script_command()
+        return True
+
+    def _is_tree_animation_active(self):
+        """检查树视图是否存在任意动画正在播放（包括遍历/搜索、BST/AVL/Huffman）。"""
+        try:
+            v = getattr(self.tree_controller, 'view', None)
+            if v is None:
+                return getattr(self.tree_controller, '_bst_build_in_progress', False)
+            if hasattr(v, 'traversal_play_timer') and v.traversal_play_timer.isActive():
+                return True
+            if hasattr(v, 'bst_animation_timer') and v.bst_animation_timer.isActive():
+                return True
+            if hasattr(v, 'avl_animation_timer') and v.avl_animation_timer.isActive():
+                return True
+            if hasattr(v, 'huffman_animation_timer') and v.huffman_animation_timer.isActive():
+                return True
+            return getattr(self.tree_controller, '_bst_build_in_progress', False)
+        except Exception:
+            return getattr(self.tree_controller, '_bst_build_in_progress', False)
+
+    def _process_next_script_command(self):
+        """在无动画冲突时，逐条处理挂起的脚本命令；否则等待动画结束后继续。"""
+        if not self._script_running:
+            if self._script_timer.isActive():
+                self._script_timer.stop()
+            return
+        # 若树动画仍在播放，暂缓执行
+        if self._is_tree_animation_active():
+            if not self._script_timer.isActive():
+                self._script_timer.start()
+            return
+        # 无动画冲突，停止轮询以避免忙等待
+        if self._script_timer.isActive():
+            self._script_timer.stop()
+        # 若队列已空，发出完成信号并结束脚本
+        if not self._script_pending_commands:
+            self.command_result.emit("success", {
+                "message": f"脚本执行完成：成功 {self._script_success_count} 条，失败 {self._script_fail_count} 条",
+                "result": None,
+                "target": self.context_target
+            })
+            self._script_running = False
+            return
+        # 取下一条命令执行
+        cmd = self._script_pending_commands.pop(0)
+        ok = False
+        try:
             ok = self.process_command(cmd)
-            if ok:
-                success_count += 1
-            else:
-                fail_count += 1
-        self.command_result.emit("success", {
-            "message": f"脚本执行完成：成功 {success_count} 条，失败 {fail_count} 条",
-            "result": None,
-            "target": self.context_target
-        })
-        return fail_count == 0
+        except Exception:
+            ok = False
+        if ok:
+            self._script_success_count += 1
+        else:
+            self._script_fail_count += 1
+        # 继续轮询执行后续命令（动画开始后将等待其结束）
+        if not self._script_timer.isActive():
+            self._script_timer.start()

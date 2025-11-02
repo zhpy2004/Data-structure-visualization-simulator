@@ -21,6 +21,8 @@ class TreeController:
         # —— BST构建为“多个插入动画”的队列状态 ——
         self._bst_build_values_queue = []
         self._bst_build_in_progress = False
+        # —— 当BST构建进行中，后续命令排队，构建完成后依次执行 ——
+        self._pending_actions_after_build = []
 
     def _ensure_view_structure(self, structure_type):
         """确保视图的结构类型选择与控制器一致，不触发视图的切换信号。
@@ -459,6 +461,21 @@ class TreeController:
             self.view.show_message("成功", "树已清空")
         except Exception as e:
             self.view.show_message("错误", f"清空失败: {str(e)}")
+
+    def queue_action_after_bst_build(self, action_type, params=None):
+        """若BST构建进行中，则排队该动作，待构建完成后自动执行。
+        返回True表示已入队；返回False表示当前不在构建流程中，请直接执行。
+        """
+        if params is None:
+            params = {}
+        if getattr(self, '_bst_build_in_progress', False):
+            try:
+                self._pending_actions_after_build.append((action_type, params))
+            except Exception:
+                # 兜底：若追加失败，不影响主流程
+                pass
+            return True
+        return False
     
     def _start_next_bst_build_insert(self):
         """开始下一个BST插入路径动画（用于“新建”为多个插入动画的构建）"""
@@ -470,6 +487,18 @@ class TreeController:
             try:
                 if hasattr(self.view, 'status_label'):
                     self.view.status_label.setText("BST构建完成")
+            except Exception:
+                pass
+            # 构建完成后，若存在排队的动作，依次执行
+            try:
+                pending = getattr(self, '_pending_actions_after_build', [])
+                self._pending_actions_after_build = []
+                for act, par in pending:
+                    try:
+                        self.handle_action(act, par)
+                    except Exception:
+                        # 不阻塞后续动作
+                        pass
             except Exception:
                 pass
             return

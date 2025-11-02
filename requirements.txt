@@ -1,4 +1,6 @@
 PyQt5==5.15.9
 pyqtgraph==0.13.3
 numpy==1.26.0
-lark-parser==0.12.0  # 用于DSL解析
+lark-parser==0.12.0
+openai>=1.30.0
+requests>=2.31.0
