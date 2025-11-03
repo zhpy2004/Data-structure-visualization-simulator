@@ -7,9 +7,9 @@
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout, QSpinBox,
-                             QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog, QTextEdit, QPlainTextEdit)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath
+                             QMessageBox, QSplitter, QFrame, QScrollArea, QInputDialog, QTextEdit, QPlainTextEdit, QSlider, QSizePolicy)
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QPainterPath, QFontMetrics
 import math
 
 
@@ -87,12 +87,24 @@ class LinearView(QWidget):
         self.is_playing = False
         self.play_speed_factor = 1.0
         self.play_base_interval_ms = 800
+        # 时间轴滑块状态
+        self._updating_slider = False
+
+        # DSL 控制台增强：历史与索引
+        self._dsl_history = []
+        self._dsl_hist_idx = -1
         
         # 初始化UI
         self._init_ui()
-        
+
         # 连接信号和槽
         self._connect_signals()
+
+        # 初始化 DSL 控制台增强（高亮、补全、历史）
+        try:
+            self._init_dsl_console_enhancements()
+        except Exception:
+            pass
     
     def _init_ui(self):
         """初始化UI"""
@@ -107,6 +119,18 @@ class LinearView(QWidget):
         structure_layout = QVBoxLayout(structure_group)
         
         self.structure_combo = QComboBox()
+        try:
+            self.structure_combo.setObjectName("structureCombo")
+            # 下拉弹出视图命名，便于QSS更高优先级控制
+            self.structure_combo.view().setObjectName("structureComboPopup")
+            # 强制设置选中与悬浮的文本/背景颜色（兼容平台样式覆盖）
+            from PyQt5.QtGui import QPalette, QColor
+            pal = self.structure_combo.view().palette()
+            pal.setColor(QPalette.Highlight, QColor("#2f80ed"))
+            pal.setColor(QPalette.HighlightedText, QColor("#000000"))
+            self.structure_combo.view().setPalette(pal)
+        except Exception:
+            pass
         self.structure_combo.addItem("顺序表", "array_list")
         self.structure_combo.addItem("链表", "linked_list")
         self.structure_combo.addItem("栈", "stack")
@@ -181,6 +205,18 @@ class LinearView(QWidget):
         buttons_layout.addWidget(self.replay_button)
         buttons_layout.addWidget(QLabel("速度"))
         buttons_layout.addWidget(self.speed_combo)
+        # 速度显示标签（与下拉同步）
+        self.speed_value_label = QLabel("1x")
+        buttons_layout.addWidget(self.speed_value_label)
+
+        # 时间轴滑块
+        buttons_layout.addWidget(QLabel("时间轴"))
+        self.timeline_slider = QSlider(Qt.Horizontal)
+        self.timeline_slider.setEnabled(False)
+        self.timeline_slider.setMinimum(0)
+        self.timeline_slider.setMaximum(0)
+        self.timeline_slider.setSingleStep(1)
+        buttons_layout.addWidget(self.timeline_slider)
         
         # 隐藏步进按钮（改为动态播放）
         self.prev_step_button.hide()
@@ -220,7 +256,7 @@ class LinearView(QWidget):
         input_bar.addWidget(QLabel(">>>"))
         self.dsl_input_line = QLineEdit()
         if hasattr(self.dsl_input_line, 'setPlaceholderText'):
-            self.dsl_input_line.setPlaceholderText("输入DSL命令，按 Enter 执行；多条指令用“;”分割")
+            self.dsl_input_line.setPlaceholderText("若要使用DSL命令，加前缀DSL:,多条指令用;分割")
         input_bar.addWidget(self.dsl_input_line)
         dsl_layout.addLayout(input_bar)
         dsl_btns = QHBoxLayout()
@@ -229,7 +265,6 @@ class LinearView(QWidget):
         dsl_btns.addWidget(self.dsl_execute_button)
         dsl_btns.addWidget(self.dsl_clear_button)
         dsl_layout.addLayout(dsl_btns)
-        main_layout.addWidget(dsl_group)
         
         # 创建分隔线
         line = QFrame()
@@ -240,12 +275,24 @@ class LinearView(QWidget):
         # 创建可视化区域
         visualization_group = QGroupBox("可视化")
         visualization_layout = QVBoxLayout(visualization_group)
+        try:
+            fm = QFontMetrics(visualization_group.font())
+            top_margin = max(12, int(fm.height() * 1.1))
+            visualization_layout.setContentsMargins(0, top_margin, 0, 0)
+            visualization_group.setContentsMargins(0, 0, 0, 0)
+            visualization_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         
         # 创建滚动区域
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)  # 允许小部件调整大小
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # 根据需要显示水平滚动条
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # 根据需要显示垂直滚动条
+        try:
+            scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         
         # 创建可视化画布
         self.canvas = LinearCanvas()
@@ -253,12 +300,25 @@ class LinearView(QWidget):
         # 将画布添加到滚动区域
         scroll_area.setWidget(self.canvas)
         
-        # 设置滚动区域的大小
-        scroll_area.setMinimumSize(800, 600)
+        # 不强制滚动区域的最小尺寸，避免在窗口化时挤压导致滚动条显示不全
         visualization_layout.addWidget(scroll_area)
-        
-        # 添加可视化区域到主布局
-        main_layout.addWidget(visualization_group, 1)  # 1表示拉伸因子
+
+        # 使用分割器承载 DSL 控制台与可视化区域，便于动态调整占比
+        self.viz_splitter = QSplitter(Qt.Vertical)
+        try:
+            self.viz_splitter.setChildrenCollapsible(False)
+            self.viz_splitter.setHandleWidth(6)
+        except Exception:
+            pass
+        self.viz_splitter.addWidget(dsl_group)
+        self.viz_splitter.addWidget(visualization_group)
+        # 将分割器添加到主布局（给予扩展拉伸因子）
+        main_layout.addWidget(self.viz_splitter, 1)
+        # 初始化分割器尺寸（窗口显示后再调整一次）
+        try:
+            QTimer.singleShot(0, self._update_splitter_sizes)
+        except Exception:
+            pass
         
         # 创建状态标签
         self.status_label = QLabel("就绪")
@@ -291,12 +351,22 @@ class LinearView(QWidget):
         self.play_button.clicked.connect(self._toggle_play)
         self.replay_button.clicked.connect(self._replay)
         self.speed_combo.currentIndexChanged.connect(self._update_speed)
+        # 时间轴滑块联动
+        self.timeline_slider.valueChanged.connect(self._scrub_timeline)
         
         # 新增：连接DSL输入与按钮
         self.dsl_execute_button.clicked.connect(self._execute_dsl_command)
         self.dsl_clear_button.clicked.connect(self._clear_dsl_input)
         if hasattr(self.dsl_input_line, 'returnPressed'):
             self.dsl_input_line.returnPressed.connect(self._execute_dsl_command)
+
+    def _init_dsl_console_enhancements(self):
+        """初始化 DSL 控制台增强功能：历史导航"""
+        # 历史导航（Up/Down）
+        try:
+            self.dsl_input_line.installEventFilter(self)
+        except Exception:
+            pass
     
     def _execute_dsl_command(self):
         """执行当前视图中的DSL命令"""
@@ -311,6 +381,41 @@ class LinearView(QWidget):
         self.dsl_command_triggered.emit(cmd)
         # 清空输入框
         self.dsl_input_line.clear()
+        # 追加到历史并重置索引（指向末尾之后）
+        try:
+            self._dsl_history.append(cmd)
+            self._dsl_hist_idx = len(self._dsl_history)
+        except Exception:
+            pass
+
+    # ---- 布局自适应：窗口化时减小 DSL 控制台高度，增大可视化区域 ----
+    def _update_splitter_sizes(self):
+        try:
+            h = max(300, int(self.viz_splitter.height()))
+        except Exception:
+            h = 600
+        # 判断是否最大化：最大化时适当保留更高的控制台；窗口化时缩小控制台
+        is_max = False
+        try:
+            is_max = bool(self.window().isMaximized())
+        except Exception:
+            is_max = False
+        if is_max:
+            top = min(320, int(h * 0.30))
+        else:
+            top = min(220, int(h * 0.20))
+        bottom = max(100, h - top)
+        try:
+            self.viz_splitter.setSizes([top, bottom])
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        try:
+            self._update_splitter_sizes()
+        except Exception:
+            pass
     
     def _clear_dsl_input(self):
         """清空DSL输入与控制台"""
@@ -323,6 +428,30 @@ class LinearView(QWidget):
         if hasattr(self, 'dsl_output'):
             self.dsl_output.appendPlainText(message)
 
+    def eventFilter(self, obj, event):
+        """捕获输入框的上下键进行历史导航"""
+        try:
+            if obj is self.dsl_input_line and event.type() == QEvent.KeyPress:
+                key = event.key()
+                if key == Qt.Key_Up:
+                    if self._dsl_history:
+                        self._dsl_hist_idx = max(0, self._dsl_hist_idx - 1)
+                        self.dsl_input_line.setText(self._dsl_history[self._dsl_hist_idx])
+                        self.dsl_input_line.setCursorPosition(len(self.dsl_input_line.text()))
+                    return True
+                elif key == Qt.Key_Down:
+                    if self._dsl_history:
+                        self._dsl_hist_idx = min(len(self._dsl_history), self._dsl_hist_idx + 1)
+                        if self._dsl_hist_idx == len(self._dsl_history):
+                            self.dsl_input_line.clear()
+                        else:
+                            self.dsl_input_line.setText(self._dsl_history[self._dsl_hist_idx])
+                            self.dsl_input_line.setCursorPosition(len(self.dsl_input_line.text()))
+                    return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
+
     def _structure_changed(self, index):
         """数据结构类型改变处理
         
@@ -331,26 +460,9 @@ class LinearView(QWidget):
         """
         # 获取选择的数据结构类型
         self.current_structure = self.structure_combo.itemData(index)
-        
-        # 更新UI显示
-        if self.current_structure == "stack":
-            # 显示栈操作按钮，隐藏顺序表和链表操作按钮
-            self.insert_button.hide()
-            self.remove_button.hide()
-            self.get_button.hide()
-            self.push_button.show()
-            self.pop_button.show()
-            self.peek_button.show()
-            self.position_spin.setEnabled(False)
-        else:
-            # 显示顺序表和链表操作按钮，隐藏栈操作按钮
-            self.insert_button.show()
-            self.remove_button.show()
-            self.get_button.show()
-            self.push_button.hide()
-            self.pop_button.hide()
-            self.peek_button.hide()
-            self.position_spin.setEnabled(True)
+
+        # 更新UI显示（视图交互触发的切换完整重置）
+        self._apply_structure_ui_state()
         
         # 禁用插入按钮直到新建
         self.insert_button.setEnabled(False)
@@ -392,6 +504,77 @@ class LinearView(QWidget):
         
         # 更新状态
         self.status_label.setText(f"当前数据结构: {self.structure_combo.currentText()}")
+
+    def _apply_structure_ui_state(self):
+        """根据当前结构类型更新本视图的按钮显隐与状态标签。
+
+        不发射任何操作信号，也不清空动画/遍历状态，仅负责 UI 呈现的一致性。
+        """
+        try:
+            if self.current_structure == "stack":
+                # 显示栈操作按钮，隐藏顺序表和链表操作按钮
+                self.insert_button.hide()
+                self.remove_button.hide()
+                self.get_button.hide()
+                self.push_button.show()
+                self.pop_button.show()
+                self.peek_button.show()
+                self.position_spin.setEnabled(False)
+            else:
+                # 显示顺序表和链表操作按钮，隐藏栈操作按钮
+                self.insert_button.show()
+                self.remove_button.show()
+                self.get_button.show()
+                self.push_button.hide()
+                self.pop_button.hide()
+                self.peek_button.hide()
+                self.position_spin.setEnabled(True)
+            # 更新状态标签
+            if hasattr(self, 'status_label') and hasattr(self, 'structure_combo'):
+                try:
+                    self.status_label.setText(f"当前数据结构: {self.structure_combo.currentText()}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def set_structure_selection(self, structure_type):
+        """程序化切换结构类型至指定值且不触发视图的 change_structure 信号。
+
+        此方法用于在控制器/加载流程发起构建/创建等动作时同步视图的结构类型选择，
+        保证当前页面与真实结构一致，同时避免触发视图的切换回调导致的清空与提示。
+        """
+        try:
+            # 计算目标索引
+            idx = -1
+            if hasattr(self, 'structure_combo'):
+                idx = self.structure_combo.findData(structure_type)
+            if idx is None:
+                idx = -1
+            # 更新 current_structure 与下拉框选择（静默，不发信号）
+            if idx != -1 and hasattr(self, 'structure_combo'):
+                if self.structure_combo.currentIndex() != idx:
+                    try:
+                        self.structure_combo.blockSignals(True)
+                        self.structure_combo.setCurrentIndex(idx)
+                        self.structure_combo.blockSignals(False)
+                    except Exception:
+                        # 兜底：若 blockSignals 出现异常，仍尽力设置索引
+                        self.structure_combo.setCurrentIndex(idx)
+                # 同步内部状态
+                self.current_structure = structure_type
+            else:
+                # 若找不到索引，至少同步内部状态，避免后续操作使用旧类型
+                self.current_structure = structure_type
+            # 应用 UI 状态（不发射 operation_triggered）
+            self._apply_structure_ui_state()
+        except Exception:
+            # 若出现异常，尽量不影响主流程
+            try:
+                self.current_structure = structure_type
+                self._apply_structure_ui_state()
+            except Exception:
+                pass
     
     def _create_structure(self):
         """创建数据结构"""
@@ -546,6 +729,16 @@ class LinearView(QWidget):
             self.prev_step_button.setEnabled(False)
         if hasattr(self, 'next_step_button'):
             self.next_step_button.setEnabled(False)
+        # 重置时间轴
+        if hasattr(self, 'timeline_slider'):
+            try:
+                self._updating_slider = True
+                self.timeline_slider.setEnabled(False)
+                self.timeline_slider.setMinimum(0)
+                self.timeline_slider.setMaximum(0)
+                self.timeline_slider.setValue(0)
+            finally:
+                self._updating_slider = False
         
         # 更新画布数据
         self.canvas.update_data(data)
@@ -580,6 +773,16 @@ class LinearView(QWidget):
             can_play = True if self.animation_steps else False
             self.play_button.setEnabled(can_play)
             self.replay_button.setEnabled(can_play)
+            # 配置时间轴滑块
+            if hasattr(self, 'timeline_slider'):
+                try:
+                    self._updating_slider = True
+                    self.timeline_slider.setEnabled(can_play)
+                    self.timeline_slider.setMinimum(0)
+                    self.timeline_slider.setMaximum(max(0, len(self.animation_steps) - 1))
+                    self.timeline_slider.setValue(0)
+                finally:
+                    self._updating_slider = False
             
             # 显示第一步并自动播放
             self._next_step()
@@ -612,37 +815,65 @@ class LinearView(QWidget):
             return steps
         
         if operation_type == 'insert':
-            # 初始高亮
+            # 初始高亮（在旧容量下）
             steps.append({
                 'type': 'highlight', 'index': index,
                 'display_data': before_list.copy(),
                 'size': before_size, 'capacity': before_capacity
             })
-            # 扩展显示列表到插入后的大小
+
+            # 若容量不足且发生了扩容，则显式展示扩容动画
+            need_resize = (before_size >= before_capacity) and (after_capacity > before_capacity)
+            if need_resize:
+                # 提示容量不足，准备扩容
+                steps.append({
+                    'type': 'resize_prepare', 'index': None,
+                    'display_data': before_list.copy(),
+                    'size': before_size, 'capacity': before_capacity
+                })
+                # 创建一个新的空表（容量翻倍）
+                steps.append({
+                    'type': 'create_new_array', 'index': None,
+                    'display_data': [],
+                    'size': 0, 'capacity': after_capacity
+                })
+                # 逐个复制旧数据到新表
+                for j in range(before_size):
+                    steps.append({
+                        'type': 'copy_element', 'index': j,
+                        'display_data': before_list[:j+1],
+                        'size': j + 1, 'capacity': after_capacity
+                    })
+                # 删除旧表（状态提示）
+                steps.append({
+                    'type': 'discard_old', 'index': None,
+                    'display_data': before_list.copy(),
+                    'size': before_size, 'capacity': after_capacity
+                })
+
+            # 在新容量下进行右移与插入
             display = before_list.copy()
             display.append(None)
-            # 右移
             for j in range(before_size - 1, index - 1, -1):
-                # 将元素右移到 j+1
                 display[j + 1] = display[j]
                 display[j] = None
                 steps.append({
                     'type': 'shift_right', 'index': j,
                     'display_data': display.copy(),
-                    'size': before_size, 'capacity': before_capacity
+                    'size': before_size, 'capacity': (after_capacity if need_resize else before_capacity)
                 })
             # 插入新值
             display[index] = value
             steps.append({
                 'type': 'insert_value', 'index': index, 'value': value,
                 'display_data': display.copy(),
-                'size': after_size, 'capacity': after_capacity
+                'size': after_size, 'capacity': (after_capacity if need_resize else before_capacity)
             })
             # 最终状态
             steps.append({
                 'type': 'final', 'index': None,
                 'display_data': after_list.copy(),
-                'size': after_size, 'capacity': after_capacity
+                'size': after_size, 'capacity': (after_capacity if need_resize else before_capacity)
             })
             return steps
         
@@ -976,6 +1207,12 @@ class LinearView(QWidget):
             self.play_speed_factor = float(text.replace('x',''))
         except Exception:
             self.play_speed_factor = 1.0
+        # 同步速度显示标签
+        if hasattr(self, 'speed_value_label'):
+            try:
+                self.speed_value_label.setText(self.speed_combo.currentText())
+            except Exception:
+                pass
         if self.is_playing:
             self.play_timer.start(self._current_interval_ms())
 
@@ -1023,10 +1260,42 @@ class LinearView(QWidget):
                 'type': 'array_list',
                 'data': step.get('display_data', []),
                 'size': step.get('size'),
-                'capacity': step.get('capacity')
+                'capacity': step.get('capacity'),
+                # 传递当前步骤类型以便画布做特殊渲染（例如扩容时双表并行显示）
+                'op_type': step.get('type'),
+                # 透传步骤索引用于绘制复制箭头
+                'op_index': step.get('index')
             }
+            # 扩容阶段：在“创建新表/复制元素”时同时传递旧表与新表数据
+            if step.get('type') in ('create_new_array', 'copy_element'):
+                try:
+                    old_state = self._before_state or {}
+                    old_list = old_state.get('data') if ('data' in old_state) else old_state.get('elements', [])
+                    old_size = old_state.get('size', len(old_list))
+                    old_capacity = old_state.get('capacity', max(old_size, len(old_list)))
+                except Exception:
+                    old_list, old_size, old_capacity = [], 0, step.get('capacity')
+                viz['dual'] = {
+                    'old': {
+                        'data': old_list,
+                        'size': old_size,
+                        'capacity': old_capacity
+                    },
+                    'new': {
+                        'data': step.get('display_data', []),
+                        'size': step.get('size'),
+                        'capacity': step.get('capacity')
+                    }
+                }
         self.canvas.update_data(viz)
         self.canvas.update()
+        # 更新时间轴位置（避免递归触发）
+        if hasattr(self, 'timeline_slider'):
+            try:
+                self._updating_slider = True
+                self.timeline_slider.setValue(max(0, self.current_step_index))
+            finally:
+                self._updating_slider = False
         
         # 更新状态栏文案
         t = step.get('type')
@@ -1039,6 +1308,17 @@ class LinearView(QWidget):
             self.status_label.setText("右移元素…")
         elif t == 'shift_left':
             self.status_label.setText("左移元素…")
+        elif t == 'resize_prepare':
+            # 展示容量不足提示
+            self.status_label.setText("容量不足，准备扩容…")
+        elif t == 'create_new_array':
+            cap = step.get('capacity')
+            self.status_label.setText(f"创建新空表（容量: {cap}）")
+        elif t == 'copy_element':
+            idx = step.get('index')
+            self.status_label.setText(f"复制元素到新表：索引 {idx}")
+        elif t == 'discard_old':
+            self.status_label.setText("删除旧表…")
         elif t == 'insert_prepare':
             self.status_label.setText("准备插入：放置新节点于下方")
         elif t == 'insert_link_next':
@@ -1082,6 +1362,26 @@ class LinearView(QWidget):
         else:
             self.next_step_button.setEnabled(False)
 
+    def _scrub_timeline(self, value):
+        """拖动时间轴滑块以跳转到指定步骤"""
+        if self._updating_slider:
+            return
+        if not self.animation_steps:
+            return
+        # 暂停播放以进入拖动预览
+        if self.is_playing:
+            self._pause_playback()
+        # 边界保护
+        idx = max(0, min(value, len(self.animation_steps) - 1))
+        if idx == self.current_step_index:
+            return
+        self.current_step_index = idx
+        step = self.animation_steps[self.current_step_index]
+        self._apply_step(step)
+        # 恢复按钮状态
+        self.prev_step_button.setEnabled(self.current_step_index > 0)
+        self.next_step_button.setEnabled(self.current_step_index < len(self.animation_steps) - 1)
+
 
 class LinearCanvas(QWidget):
     """线性结构可视化画布"""
@@ -1092,13 +1392,21 @@ class LinearCanvas(QWidget):
         
         # 设置最小尺寸，允许画布根据内容自适应延伸
         self.setMinimumSize(800, 600)  # 设置初始最小尺寸
+        # 开启鼠标跟踪用于悬停反馈
+        try:
+            self.setMouseTracking(True)
+        except Exception:
+            pass
         
         # 初始化数据
         self.data = None
         self.structure_type = None
         self.capacity = None
         self.size = None
-        self.highlighted_index = None
+        # 高亮相关（改为属性以触发渐隐渐显动画）
+        self._highlighted_index = None
+        self.highlight_opacity = 0.0
+        self._highlight_anim = None
         # 链表插入/删除动画状态
         self.step_type = None
         self.linked_aux = None
@@ -1110,6 +1418,39 @@ class LinearCanvas(QWidget):
         self.persist_delete_arrow = False
         self.persist_delete_index = None
         self.linked_aux_del = None
+        # 数组扩容动画：复制阶段的索引
+        self.array_op_index = None
+
+        # 交互：缩放与平移
+        self.zoom_scale = 1.0
+        self.pan_tx = 0
+        self.pan_ty = 0
+        self._panning = False
+        self._last_mouse_pos = None
+
+        # 交互：悬停与选择反馈
+        self.hovered_index = None
+        self.selected_index = None
+
+    # ---- 字体缩放工具 ----
+    def _font_scale(self):
+        try:
+            w = int(self.window().width())
+        except Exception:
+            w = int(self.width())
+        scale = w / 1000.0
+        if scale < 1.0:
+            scale = 1.0
+        if scale > 1.6:
+            scale = 1.6
+        return scale
+
+    def _scaled_font(self, base_pt):
+        try:
+            size_pt = int(round((base_pt or 12) * self._font_scale()))
+        except Exception:
+            size_pt = int(base_pt or 12)
+        return QFont("Arial", size_pt)
     
     def update_data(self, data):
         """更新数据
@@ -1180,6 +1521,21 @@ class LinearCanvas(QWidget):
             if not self.data:
                 # 尝试其他可能的键
                 self.data = data.get("data", [])
+            # 记录步骤类型（用于数组扩容的双表渲染）
+            try:
+                self.step_type = data.get('op_type')
+            except Exception:
+                self.step_type = None
+            # 记录步骤索引（用于复制阶段箭头指示）
+            try:
+                self.array_op_index = data.get('op_index')
+            except Exception:
+                self.array_op_index = None
+            # 读取双表信息（扩容阶段）
+            try:
+                self.dual_arrays = data.get('dual')
+            except Exception:
+                self.dual_arrays = None
             # 非链表步骤清除持久箭头状态
             self.persist_next_arrow = False
             self.persist_prev_arrow = False
@@ -1202,11 +1558,32 @@ class LinearCanvas(QWidget):
             required_width = len(self.data) * 150 + 100
         else:
             # 其他线性结构
-            total_slots = self.capacity if (self.structure_type == "array_list" and self.capacity) else len(self.data)
-            required_width = total_slots * 80 + 100
+            if self.structure_type == "array_list" and getattr(self, 'dual_arrays', None) and (self.step_type in ('create_new_array','copy_element')):
+                try:
+                    old = self.dual_arrays.get('old', {})
+                    new = self.dual_arrays.get('new', {})
+                    old_capacity = old.get('capacity')
+                    new_capacity = new.get('capacity')
+                    old_size = old.get('size', len(old.get('data', [])))
+                    new_size = new.get('size', len(new.get('data', [])))
+                    slots_old = old_capacity if old_capacity is not None else max(1, old_size)
+                    slots_new = new_capacity if new_capacity is not None else max(1, new_size)
+                    total_slots = max(slots_old, slots_new)
+                except Exception:
+                    total_slots = self.capacity if self.capacity is not None else len(self.data)
+                required_width = total_slots * 80 + 100
+            else:
+                total_slots = self.capacity if (self.structure_type == "array_list" and self.capacity) else len(self.data)
+                required_width = total_slots * 80 + 100
         
         # 设置最小高度（栈随元素数量自适应高度）
-        required_height = (100 + len(self.data) * 40) if self.structure_type == "stack" else 300
+        if self.structure_type == "stack":
+            required_height = 100 + len(self.data) * 40
+        elif self.structure_type == "array_list" and getattr(self, 'dual_arrays', None) and (self.step_type in ('create_new_array','copy_element')):
+            # 双表并行显示需要更高的画布
+            required_height = 520
+        else:
+            required_height = 300
         
         # 更新画布尺寸
         self.setMinimumSize(max(800, required_width), max(600, required_height))
@@ -1223,12 +1600,19 @@ class LinearCanvas(QWidget):
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(QColor(100, 100, 100)))
-            painter.setFont(QFont("Arial", 14))
+            painter.setFont(self._scaled_font(14))
             painter.drawText(self.rect(), Qt.AlignCenter, "暂无数据可显示")
             return
         
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        # 应用平移与缩放变换（平滑缩放与拖拽平移）
+        try:
+            painter.translate(self.pan_tx, self.pan_ty)
+            painter.scale(self.zoom_scale, self.zoom_scale)
+        except Exception:
+            pass
         
         # 根据结构类型选择绘制方法
         if self.structure_type == "array_list":
@@ -1248,20 +1632,107 @@ class LinearCanvas(QWidget):
             painter: QPainter对象
         """
         # 设置字体
-        font = QFont("Arial", 12)
+        font = self._scaled_font(12)
         painter.setFont(font)
+        # 根据字体缩放比例同步调整单元格尺寸与间距
+        try:
+            scale = self._font_scale()
+        except Exception:
+            scale = 1.0
+        cell_width = int(60 * scale)
+        cell_height = int(40 * scale)
+        start_x = int(50 * scale)
+        start_y = int(100 * scale)
         
-        # 计算单元格尺寸
-        cell_width = 60
-        cell_height = 40
-        start_x = 50
-        start_y = 100
-        
+        # 扩容阶段：在“创建新空表/复制元素”时同时绘制旧表与新表
+        dual = getattr(self, 'dual_arrays', None)
+        if dual and (self.step_type in ('create_new_array','copy_element')):
+            # ---- 绘制旧表（上方） ----
+            old = dual.get('old', {})
+            old_data = old.get('data', [])
+            old_size = old.get('size', len(old_data))
+            old_capacity = old.get('capacity', max(old_size, len(old_data)))
+            total_old = old_capacity if old_capacity is not None else len(old_data)
+            painter.drawText(start_x, start_y - int(30 * scale), "旧表")
+            painter.drawText(start_x + int(120 * scale), start_y - int(30 * scale), f"容量: {old_capacity}  大小: {old_size}")
+            for i in range(total_old):
+                x = start_x + i * cell_width
+                painter.drawText(x + int(20 * scale), start_y - int(10 * scale), str(i))
+            for i in range(total_old):
+                x = start_x + i * cell_width
+                painter.setPen(QPen(Qt.black, 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(x, start_y, cell_width, cell_height)
+                val = old_data[i] if i < len(old_data) else None
+                if val is None:
+                    painter.setPen(QPen(QColor(150, 150, 150)))
+                    painter.drawText(x + int(20 * scale), start_y + int(25 * scale), "")
+                else:
+                    painter.setPen(QPen(Qt.black))
+                    painter.drawText(x + int(20 * scale), start_y + int(25 * scale), str(val))
+
+            # ---- 绘制新表（下方） ----
+            new_y = start_y + cell_height + int(180 * scale)
+            new = dual.get('new', {})
+            new_data = new.get('data', [])
+            new_size = new.get('size', len(new_data) if new_data is not None else 0)
+            new_capacity = new.get('capacity', max(new_size, len(new_data)))
+            total_new = new_capacity if new_capacity is not None else len(new_data)
+            painter.drawText(start_x, new_y - int(30 * scale), "新表")
+            painter.drawText(start_x + int(120 * scale), new_y - int(30 * scale), f"容量: {new_capacity}  大小: {new_size}")
+            for i in range(total_new):
+                x = start_x + i * cell_width
+                painter.drawText(x + int(20 * scale), new_y - int(10 * scale), str(i))
+            for i in range(total_new):
+                x = start_x + i * cell_width
+                # 新表当前填充的格子以浅色标识
+                is_filled = (i < len(new_data)) and (new_data[i] is not None)
+                if is_filled:
+                    painter.setPen(QPen(QColor(0, 122, 204), 2))
+                    painter.setBrush(QColor(190, 220, 255))
+                else:
+                    painter.setPen(QPen(Qt.black, 2))
+                    painter.setBrush(Qt.NoBrush)
+                painter.drawRect(x, new_y, cell_width, cell_height)
+                val = new_data[i] if i < len(new_data) else None
+                if val is None:
+                    painter.setPen(QPen(QColor(150, 150, 150)))
+                    painter.drawText(x + int(20 * scale), new_y + int(25 * scale), "")
+                else:
+                    painter.setPen(QPen(Qt.black))
+                    painter.drawText(x + int(20 * scale), new_y + int(25 * scale), str(val))
+
+            # 复制阶段：绘制从旧表到新表的箭头（索引一致）
+            if self.step_type == 'copy_element':
+                try:
+                    idx = self.array_op_index
+                except Exception:
+                    idx = None
+                # 若无法获取当前索引，不绘制箭头
+                if isinstance(idx, int):
+                    ox = start_x + idx * cell_width + cell_width // 2
+                    oy = start_y + cell_height // 2
+                    nx = start_x + idx * cell_width + cell_width // 2
+                    ny = new_y + cell_height // 2
+                    painter.setPen(QPen(QColor(66, 66, 66), 2))
+                    painter.drawLine(ox, oy, nx, ny)
+                    # 箭头
+                    angle = math.atan2(ny - oy, nx - ox)
+                    ah = int(10 * scale)
+                    ax1 = int(nx - ah * math.cos(angle - math.pi/6))
+                    ay1 = int(ny - ah * math.sin(angle - math.pi/6))
+                    ax2 = int(nx - ah * math.cos(angle + math.pi/6))
+                    ay2 = int(ny - ah * math.sin(angle + math.pi/6))
+                    painter.drawLine(ax1, ay1, nx, ny)
+                    painter.drawLine(ax2, ay2, nx, ny)
+            return
+
+        # ---- 默认：单表绘制 ----
         # 绘制顺序表标题
-        painter.drawText(start_x, start_y - 30, "顺序表")
+        painter.drawText(start_x, start_y - int(30 * scale), "顺序表")
         # 绘制容量和大小
         if self.capacity is not None and self.size is not None:
-            painter.drawText(start_x + 120, start_y - 30, f"容量: {self.capacity}  大小: {self.size}")
+            painter.drawText(start_x + int(120 * scale), start_y - int(30 * scale), f"容量: {self.capacity}  大小: {self.size}")
         
         # 计算应绘制的总槽位数（优先使用容量）
         total_cells = self.capacity if self.capacity is not None else len(self.data)
@@ -1269,16 +1740,26 @@ class LinearCanvas(QWidget):
         # 绘制索引
         for i in range(total_cells):
             x = start_x + i * cell_width
-            painter.drawText(x + 20, start_y - 10, str(i))
+            painter.drawText(x + int(20 * scale), start_y - int(10 * scale), str(i))
         
         # 绘制单元格和值（为未赋值的槽位也绘制空格）
         for i in range(total_cells):
             x = start_x + i * cell_width
             
-            # 绘制单元格
+            # 绘制单元格（支持动画高亮、选择、悬停）
             if self.highlighted_index is not None and i == self.highlighted_index:
+                try:
+                    alpha = max(0, min(255, int(60 + 195 * self.highlight_opacity)))
+                except Exception:
+                    alpha = 255
                 painter.setPen(QPen(QColor(255, 152, 0), 2))
-                painter.setBrush(QColor(255, 224, 178))
+                painter.setBrush(QColor(255, 224, 178, alpha))
+            elif self.selected_index is not None and i == self.selected_index:
+                painter.setPen(QPen(QColor(0, 122, 204), 2))
+                painter.setBrush(QColor(190, 220, 255))
+            elif self.hovered_index is not None and i == self.hovered_index:
+                painter.setPen(QPen(QColor(30, 144, 255), 2))
+                painter.setBrush(QColor(230, 245, 255))
             else:
                 painter.setPen(QPen(Qt.black, 2))
                 painter.setBrush(Qt.NoBrush)
@@ -1288,10 +1769,10 @@ class LinearCanvas(QWidget):
             value = self.data[i] if i < len(self.data) else None
             if value is None:
                 painter.setPen(QPen(QColor(150, 150, 150)))
-                painter.drawText(x + 20, start_y + 25, "")
+                painter.drawText(x + int(20 * scale), start_y + int(25 * scale), "")
             else:
                 painter.setPen(QPen(Qt.black))
-                painter.drawText(x + 20, start_y + 25, str(value))
+                painter.drawText(x + int(20 * scale), start_y + int(25 * scale), str(value))
     
     def _draw_linked_list(self, painter):
         """绘制链表
@@ -1300,39 +1781,52 @@ class LinearCanvas(QWidget):
             painter: QPainter对象
         """
         # 设置字体
-        font = QFont("Arial", 12)
+        font = self._scaled_font(12)
         painter.setFont(font)
-        
-        # 计算节点尺寸
-        node_width = 60
-        node_height = 40
-        arrow_length = 60
-        start_x = 50
-        start_y = 100
+        # 根据字体缩放比例同步调整节点尺寸与间距
+        try:
+            scale = self._font_scale()
+        except Exception:
+            scale = 1.0
+        node_width = int(60 * scale)
+        node_height = int(40 * scale)
+        arrow_length = int(60 * scale)
+        start_x = int(50 * scale)
+        start_y = int(100 * scale)
         
         # 绘制链表标题
-        painter.drawText(start_x, start_y - 30, "链表")
+        painter.drawText(start_x, start_y - int(30 * scale), "链表")
         
         # 绘制索引标签
         for i in range(len(self.data)):
             x = start_x + i * (node_width + arrow_length)
-            painter.drawText(x + 20, start_y - 10, str(i))
+            painter.drawText(x + int(20 * scale), start_y - int(10 * scale), str(i))
         
         # 绘制节点和箭头
         for i, value in enumerate(self.data):
             x = start_x + i * (node_width + arrow_length)
             
-            # 绘制节点（支持高亮）
+            # 绘制节点（支持动画高亮、选择、悬停）
             if self.highlighted_index is not None and i == self.highlighted_index:
+                try:
+                    alpha = max(0, min(255, int(60 + 195 * self.highlight_opacity)))
+                except Exception:
+                    alpha = 255
                 painter.setPen(QPen(QColor(255, 152, 0), 2))
-                painter.setBrush(QColor(255, 224, 178))
+                painter.setBrush(QColor(255, 224, 178, alpha))
+            elif self.selected_index is not None and i == self.selected_index:
+                painter.setPen(QPen(QColor(0, 122, 204), 2))
+                painter.setBrush(QColor(190, 220, 255))
+            elif self.hovered_index is not None and i == self.hovered_index:
+                painter.setPen(QPen(QColor(30, 144, 255), 2))
+                painter.setBrush(QColor(230, 245, 255))
             else:
                 painter.setPen(QPen(Qt.black, 2))
                 painter.setBrush(Qt.NoBrush)
             painter.drawRect(x, start_y, node_width, node_height)
             
             # 绘制值
-            painter.drawText(x + 20, start_y + 25, str(value))
+            painter.drawText(x + int(20 * scale), start_y + int(25 * scale), str(value))
             
             # 绘制箭头（除了最后一个节点）
             if i < len(self.data) - 1:
@@ -1353,14 +1847,14 @@ class LinearCanvas(QWidget):
                     arrow_y = start_y + node_height // 2
                     painter.setPen(QPen(QColor(66, 66, 66)))
                     painter.drawLine(arrow_x, arrow_y, arrow_x + arrow_length, arrow_y)
-                    painter.drawLine(arrow_x + arrow_length - 10, arrow_y - 5, arrow_x + arrow_length, arrow_y)
-                    painter.drawLine(arrow_x + arrow_length - 10, arrow_y + 5, arrow_x + arrow_length, arrow_y)
+                    painter.drawLine(arrow_x + arrow_length - int(10 * scale), arrow_y - int(5 * scale), arrow_x + arrow_length, arrow_y)
+                    painter.drawLine(arrow_x + arrow_length - int(10 * scale), arrow_y + int(5 * scale), arrow_x + arrow_length, arrow_y)
         
         # 绘制最后一个节点的NULL指针
         if self.data:
             last_x = start_x + (len(self.data) - 1) * (node_width + arrow_length) + node_width
             last_y = start_y + node_height // 2
-            painter.drawText(last_x + 10, last_y + 5, "NULL")
+            painter.drawText(last_x + int(10 * scale), last_y + int(5 * scale), "NULL")
         
         # 插入动画的辅助节点绘制
         if self.linked_aux and self.step_type in ('insert_prepare','insert_link_next','insert_link_prev'):
@@ -1379,11 +1873,11 @@ class LinearCanvas(QWidget):
             else:
                 gap_center_x = start_x + node_width / 2
             x_aux = int(gap_center_x - node_width / 2)
-            y_aux = start_y + node_height + 60
+            y_aux = start_y + node_height + int(60 * scale)
             painter.setPen(QPen(QColor(255, 152, 0), 2))
             painter.setBrush(QColor(255, 224, 178))
             painter.drawRect(x_aux, y_aux, node_width, node_height)
-            painter.drawText(x_aux + 15, y_aux + 25, str(aux_value))
+            painter.drawText(x_aux + int(15 * scale), y_aux + int(25 * scale), str(aux_value))
         
         # 持久插入箭头：在后续步骤保留直至最终
         if self.persist_insert_index is not None and (self.persist_next_arrow or self.persist_prev_arrow):
@@ -1401,7 +1895,7 @@ class LinearCanvas(QWidget):
             else:
                 gap_center_x = start_x + node_width / 2
             x_aux = int(gap_center_x - node_width / 2)
-            y_aux = start_y + node_height + 60
+            y_aux = start_y + node_height + int(60 * scale)
             painter.setPen(QPen(QColor(66, 66, 66)))
             # 保留：插入节点指向后继
             if self.persist_next_arrow:
@@ -1412,10 +1906,10 @@ class LinearCanvas(QWidget):
                     ey = start_y + node_height
                 else:
                     ex = sx + arrow_length
-                    ey = sy - max(20, arrow_length // 2)
+                    ey = sy - max(int(20 * scale), arrow_length // 2)
                 painter.drawLine(sx, sy, ex, ey)
                 angle = math.atan2(ey - sy, ex - sx)
-                ah = 10
+                ah = int(10 * scale)
                 ax1 = int(ex - ah * math.cos(angle - math.pi/6))
                 ay1 = int(ey - ah * math.sin(angle - math.pi/6))
                 ax2 = int(ex - ah * math.cos(angle + math.pi/6))
@@ -1423,7 +1917,7 @@ class LinearCanvas(QWidget):
                 painter.drawLine(ax1, ay1, ex, ey)
                 painter.drawLine(ax2, ay2, ex, ey)
                 if next_x is None:
-                    painter.drawText(ex + 5, ey - 5, "NULL")
+                    painter.drawText(ex + int(5 * scale), ey - int(5 * scale), "NULL")
             # 保留：前驱指向插入节点
             if self.persist_prev_arrow and prev_x is not None:
                 sx = prev_x + node_width // 2
@@ -1432,7 +1926,7 @@ class LinearCanvas(QWidget):
                 ey = y_aux
                 painter.drawLine(sx, sy, ex, ey)
                 angle = math.atan2(ey - sy, ex - sx)
-                ah = 10
+                ah = int(10 * scale)
                 ax1 = int(ex - ah * math.cos(angle - math.pi/6))
                 ay1 = int(ey - ah * math.sin(angle - math.pi/6))
                 ax2 = int(ex - ah * math.cos(angle + math.pi/6))
@@ -1455,18 +1949,18 @@ class LinearCanvas(QWidget):
                     ey = start_y + node_height
                 else:
                     ex = sx + arrow_length
-                    ey = sy - max(20, arrow_length // 2)
+                    ey = sy - max(int(20 * scale), arrow_length // 2)
                 painter.setPen(QPen(QColor(66, 66, 66), 2))
                 path = QPainterPath()
                 path.moveTo(sx, sy)
                 mid_x = (sx + ex) / 2
-                arc_depth = max(50, arrow_length // 2)
+                arc_depth = max(int(50 * scale), arrow_length // 2)
                 ctrl_x = mid_x
                 ctrl_y = max(sy, ey) + arc_depth
                 path.quadTo(ctrl_x, ctrl_y, ex, ey)
                 painter.drawPath(path)
                 angle = math.atan2(ey - ctrl_y, ex - ctrl_x)
-                ah = 10
+                ah = int(10 * scale)
                 ax1 = int(ex - ah * math.cos(angle - math.pi/6))
                 ay1 = int(ey - ah * math.sin(angle - math.pi/6))
                 ax2 = int(ex - ah * math.cos(angle + math.pi/6))
@@ -1474,7 +1968,7 @@ class LinearCanvas(QWidget):
                 painter.drawLine(ax1, ay1, ex, ey)
                 painter.drawLine(ax2, ay2, ex, ey)
                 if next_x is None:
-                    painter.drawText(ex + 5, ey - 5, "NULL")
+                    painter.drawText(ex + int(5 * scale), ey - int(5 * scale), "NULL")
     
     def _draw_stack(self, painter):
                 """绘制栈
@@ -1483,13 +1977,16 @@ class LinearCanvas(QWidget):
                     painter: QPainter对象
                 """
                 # 设置字体
-                font = QFont("Arial", 12)
+                font = self._scaled_font(12)
                 painter.setFont(font)
-                
-                # 计算单元格尺寸
-                cell_width = 100
-                cell_height = 40
-                margin_bottom = 60
+                # 根据字体缩放比例同步调整单元格尺寸与间距
+                try:
+                    scale = self._font_scale()
+                except Exception:
+                    scale = 1.0
+                cell_width = int(100 * scale)
+                cell_height = int(40 * scale)
+                margin_bottom = int(60 * scale)
                 # 底部居中：以栈单元宽度居中定位
                 start_x = (self.width() - cell_width) // 2
                 start_y = self.height() - margin_bottom - cell_height
@@ -1499,12 +1996,12 @@ class LinearCanvas(QWidget):
                 # 绘制栈底和栈顶标记
                 if self.data:
                     # 栈底标签
-                    painter.drawText(start_x - 80, start_y + 5, "栈底")
+                    painter.drawText(start_x - int(80 * scale), start_y + int(5 * scale), "栈底")
                     # 栈顶标签，避免单元素时与栈底重叠
-                    top_label_y = start_y - (len(self.data) - 1) * cell_height + 5
+                    top_label_y = start_y - (len(self.data) - 1) * cell_height + int(5 * scale)
                     if len(self.data) == 1:
-                        top_label_y = start_y - cell_height + 5  # 上移到单元格顶部上方
-                    painter.drawText(start_x - 80, top_label_y, "栈顶")
+                        top_label_y = start_y - cell_height + int(5 * scale)  # 上移到单元格顶部上方
+                    painter.drawText(start_x - int(80 * scale), top_label_y, "栈顶")
                 
                 # 绘制栈元素（从下往上）
                 for i, value in enumerate(self.data):
@@ -1514,6 +2011,12 @@ class LinearCanvas(QWidget):
                     if self.highlighted_index is not None and i == self.highlighted_index:
                         painter.setPen(QPen(QColor(255, 152, 0), 2))
                         painter.setBrush(QColor(255, 224, 178))
+                    elif self.selected_index is not None and i == self.selected_index:
+                        painter.setPen(QPen(QColor(0, 122, 204), 2))
+                        painter.setBrush(QColor(190, 220, 255))
+                    elif self.hovered_index is not None and i == self.hovered_index:
+                        painter.setPen(QPen(QColor(30, 144, 255), 2))
+                        painter.setBrush(QColor(230, 245, 255))
                     else:
                         painter.setPen(QPen(Qt.black, 2))
                         painter.setBrush(Qt.NoBrush)
@@ -1521,4 +2024,181 @@ class LinearCanvas(QWidget):
                     
                     # 绘制值
                     painter.setPen(QPen(Qt.black))
-                    painter.drawText(start_x + 40, y + 25, str(value))
+                    painter.drawText(start_x + int(40 * scale), y + int(25 * scale), str(value))
+    @property
+    def highlighted_index(self):
+        return self._highlighted_index
+
+    @highlighted_index.setter
+    def highlighted_index(self, idx):
+        # 设置新的高亮索引并启动渐隐渐显动画
+        self._highlighted_index = idx if isinstance(idx, int) else None
+        self._start_highlight_fade()
+
+    def _start_highlight_fade(self):
+        try:
+            if self._highlight_anim:
+                self._highlight_anim.stop()
+            if self._highlighted_index is None:
+                # 无高亮时直接透明
+                self.highlight_opacity = 0.0
+                self.update()
+                return
+            self.highlight_opacity = 0.0
+            anim = QVariantAnimation(self)
+            anim.setDuration(400)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            def on_value(v):
+                self.highlight_opacity = float(v)
+                self.update()
+            anim.valueChanged.connect(on_value)
+            self._highlight_anim = anim
+            anim.start()
+        except Exception:
+            self.highlight_opacity = 1.0
+            self.update()
+
+    # ------- 交互：缩放与平移、悬停与点击 -------
+    def _to_scene(self, pos):
+        """将窗口坐标转换为场景坐标（考虑当前平移与缩放）"""
+        try:
+            x = (pos.x() - self.pan_tx) / (self.zoom_scale if self.zoom_scale != 0 else 1.0)
+            y = (pos.y() - self.pan_ty) / (self.zoom_scale if self.zoom_scale != 0 else 1.0)
+            return x, y
+        except Exception:
+            return pos.x(), pos.y()
+
+    def wheelEvent(self, event):
+        try:
+            delta = event.angleDelta().y()
+            if delta == 0:
+                return
+            factor = pow(1.0015, delta)
+            new_scale = max(0.5, min(3.0, self.zoom_scale * factor))
+            # 以鼠标位置为缩放锚点，调整平移使锚点保持稳定
+            anchor = event.pos()
+            s1 = self.zoom_scale
+            s2 = new_scale
+            tx1 = self.pan_tx
+            ty1 = self.pan_ty
+            xs = (anchor.x() - tx1) / (s1 if s1 != 0 else 1.0)
+            ys = (anchor.y() - ty1) / (s1 if s1 != 0 else 1.0)
+            self.zoom_scale = s2
+            self.pan_tx = anchor.x() - s2 * xs
+            self.pan_ty = anchor.y() - s2 * ys
+            self.update()
+        except Exception:
+            pass
+
+    def mousePressEvent(self, event):
+        try:
+            if event.button() == Qt.LeftButton:
+                # 命中测试，若点击在元素上则选中，否则进入拖拽平移
+                sx, sy = self._to_scene(event.pos())
+                hit = self._hit_test((sx, sy))
+                if hit is not None:
+                    self.selected_index = hit
+                    self.update()
+                    return
+                # 未命中任何元素，开始拖拽平移
+                self._panning = True
+                self._last_mouse_pos = event.pos()
+                try:
+                    self.setCursor(Qt.ClosedHandCursor)
+                except Exception:
+                    pass
+            elif event.button() == Qt.MiddleButton:
+                # 中键强制开始平移
+                self._panning = True
+                self._last_mouse_pos = event.pos()
+                try:
+                    self.setCursor(Qt.ClosedHandCursor)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def mouseMoveEvent(self, event):
+        try:
+            if self._panning and self._last_mouse_pos is not None:
+                d = event.pos() - self._last_mouse_pos
+                self.pan_tx += d.x()
+                self.pan_ty += d.y()
+                self._last_mouse_pos = event.pos()
+                self.update()
+            else:
+                # 悬停命中测试
+                sx, sy = self._to_scene(event.pos())
+                self.hovered_index = self._hit_test((sx, sy))
+                self.update()
+        except Exception:
+            pass
+
+    def mouseReleaseEvent(self, event):
+        try:
+            if event.button() in (Qt.LeftButton, Qt.MiddleButton):
+                self._panning = False
+                self._last_mouse_pos = None
+                try:
+                    self.setCursor(Qt.ArrowCursor)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _hit_test(self, scene_pos):
+        """返回命中的索引（若未命中返回None）"""
+        try:
+            x, y = scene_pos
+            if self.structure_type == "array_list":
+                try:
+                    scale = self._font_scale()
+                except Exception:
+                    scale = 1.0
+                cell_width = int(60 * scale)
+                cell_height = int(40 * scale)
+                start_x = int(50 * scale)
+                start_y = int(100 * scale)
+                total_cells = self.capacity if self.capacity is not None else (len(self.data) if self.data else 0)
+                for i in range(total_cells):
+                    rx = start_x + i * cell_width
+                    ry = start_y
+                    if rx <= x <= rx + cell_width and ry <= y <= ry + cell_height:
+                        return i
+                return None
+            elif self.structure_type == "linked_list":
+                try:
+                    scale = self._font_scale()
+                except Exception:
+                    scale = 1.0
+                node_width = int(60 * scale)
+                node_height = int(40 * scale)
+                arrow_length = int(60 * scale)
+                start_x = int(50 * scale)
+                start_y = int(100 * scale)
+                for i in range(len(self.data)):
+                    rx = start_x + i * (node_width + arrow_length)
+                    ry = start_y
+                    if rx <= x <= rx + node_width and ry <= y <= ry + node_height:
+                        return i
+                return None
+            elif self.structure_type == "stack":
+                try:
+                    scale = self._font_scale()
+                except Exception:
+                    scale = 1.0
+                cell_width = int(100 * scale)
+                cell_height = int(40 * scale)
+                margin_bottom = int(60 * scale)
+                start_x = (self.width() - cell_width) // 2
+                start_y = self.height() - margin_bottom - cell_height
+                for i in range(len(self.data)):
+                    ry = start_y - i * cell_height
+                    if start_x <= x <= start_x + cell_width and ry <= y <= ry + cell_height:
+                        return i
+                return None
+            return None
+        except Exception:
+            return None

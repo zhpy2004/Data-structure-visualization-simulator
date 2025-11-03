@@ -8,9 +8,9 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QLineEdit, QGroupBox, QFormLayout,
                              QMessageBox, QSplitter, QFrame, QRadioButton, QButtonGroup,
-                             QScrollArea, QApplication, QMenu, QInputDialog, QTextEdit, QPlainTextEdit)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QBrush
+                             QScrollArea, QApplication, QMenu, QInputDialog, QTextEdit, QPlainTextEdit, QSlider, QSizePolicy)
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QBrush, QFontMetrics
 
 
 class TreeView(QWidget):
@@ -140,6 +140,8 @@ class TreeView(QWidget):
             if self.canvas.node_id_map:
                 self.canvas.highlighted_nodes = [self.canvas.node_id_map[0]]
                 self.canvas.current_traversal_index = 0
+                # 配置时间轴滑块范围与当前位置
+                self._configure_timeline_slider()
                 info0 = self.huffman_step_info[0] if self.huffman_step_info else None
                 if info0:
                     self.status_label.setText(
@@ -260,6 +262,8 @@ class TreeView(QWidget):
             if self.canvas.node_id_map:
                 self.canvas.highlighted_nodes = [self.canvas.node_id_map[0]]
                 self.canvas.current_traversal_index = 0
+                # 配置时间轴滑块范围与当前位置
+                self._configure_timeline_slider()
                 info0 = self.huffman_step_info[0] if self.huffman_step_info else None
                 if info0:
                     if info0.get('recognized_char'):
@@ -333,12 +337,24 @@ class TreeView(QWidget):
         self.traversal_play_speed_factor = 1.0
         # 重播流程标记：用于在动画结束后恢复到操作后状态
         self.replay_in_progress = False
+        # 时间轴滑块更新保护标记
+        self._updating_slider = False
+
+        # DSL 控制台增强：历史与索引
+        self._dsl_history = []
+        self._dsl_hist_idx = -1
         
         # 初始化UI
         self._init_ui()
-        
+
         # 连接信号和槽
         self._connect_signals()
+
+        # 初始化 DSL 控制台增强（高亮、补全、历史）
+        try:
+            self._init_dsl_console_enhancements()
+        except Exception:
+            pass
     
     def _init_ui(self):
         """初始化UI"""
@@ -353,6 +369,16 @@ class TreeView(QWidget):
         structure_layout = QVBoxLayout(structure_group)
         
         self.structure_combo = QComboBox()
+        try:
+            self.structure_combo.setObjectName("structureCombo")
+            self.structure_combo.view().setObjectName("structureComboPopup")
+            from PyQt5.QtGui import QPalette, QColor
+            pal = self.structure_combo.view().palette()
+            pal.setColor(QPalette.Highlight, QColor("#2f80ed"))
+            pal.setColor(QPalette.HighlightedText, QColor("#000000"))
+            self.structure_combo.view().setPalette(pal)
+        except Exception:
+            pass
         self.structure_combo.addItem("二叉树", "binary_tree")
         self.structure_combo.addItem("二叉搜索树", "bst")
         self.structure_combo.addItem("平衡二叉树(AVL树)", "avl_tree")
@@ -464,6 +490,17 @@ class TreeView(QWidget):
         self.speed_combo.setCurrentText("1x")
         buttons_layout.addWidget(speed_label)
         buttons_layout.addWidget(self.speed_combo)
+        # 速度显示标签（与下拉同步）
+        self.speed_value_label = QLabel("1x")
+        buttons_layout.addWidget(self.speed_value_label)
+        # 时间轴滑块
+        buttons_layout.addWidget(QLabel("时间轴"))
+        self.timeline_slider = QSlider(Qt.Horizontal)
+        self.timeline_slider.setEnabled(False)
+        self.timeline_slider.setMinimum(0)
+        self.timeline_slider.setMaximum(0)
+        self.timeline_slider.setSingleStep(1)
+        buttons_layout.addWidget(self.timeline_slider)
         
         # 默认隐藏哈夫曼树操作按钮
         self.encode_button.hide()
@@ -495,7 +532,7 @@ class TreeView(QWidget):
         input_bar.addWidget(QLabel(">>>"))
         self.dsl_input_line = QLineEdit()
         if hasattr(self.dsl_input_line, 'setPlaceholderText'):
-            self.dsl_input_line.setPlaceholderText("输入DSL命令，例如: create bst with 1,2,3；多条指令用“;”分割")
+            self.dsl_input_line.setPlaceholderText("若要使用DSL命令，加前缀DSL:,多条指令用;分割")
         input_bar.addWidget(self.dsl_input_line)
         dsl_layout.addLayout(input_bar)
         dsl_btns = QHBoxLayout()
@@ -504,7 +541,6 @@ class TreeView(QWidget):
         dsl_btns.addWidget(self.dsl_execute_button)
         dsl_btns.addWidget(self.dsl_clear_button)
         dsl_layout.addLayout(dsl_btns)
-        main_layout.addWidget(dsl_group)
         
         # 创建分隔线
         line = QFrame()
@@ -515,12 +551,24 @@ class TreeView(QWidget):
         # 创建可视化区域
         visualization_group = QGroupBox("可视化")
         visualization_layout = QVBoxLayout(visualization_group)
+        try:
+            fm = QFontMetrics(visualization_group.font())
+            top_margin = max(12, int(fm.height() * 1.1))
+            visualization_layout.setContentsMargins(0, top_margin, 0, 0)
+            visualization_group.setContentsMargins(0, 0, 0, 0)
+            visualization_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         
         # 创建滚动区域
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)  # 设置为True，允许画布自适应延伸
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # 根据需要显示水平滚动条
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # 根据需要显示垂直滚动条
+        try:
+            scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         
         # 创建可视化画布
         self.canvas = TreeCanvas()
@@ -529,12 +577,25 @@ class TreeView(QWidget):
         # 将画布添加到滚动区域
         scroll_area.setWidget(self.canvas)
         
-        # 设置滚动区域的最小大小
-        scroll_area.setMinimumSize(800, 600)
+        # 不强制滚动区域的最小尺寸，避免在窗口化时挤压导致滚动条显示不全
         visualization_layout.addWidget(scroll_area)
-        
-        # 添加可视化区域到主布局
-        main_layout.addWidget(visualization_group, 1)  # 1表示拉伸因子
+
+        # 使用分割器承载 DSL 控制台与可视化区域，便于动态调整占比
+        self.viz_splitter = QSplitter(Qt.Vertical)
+        try:
+            self.viz_splitter.setChildrenCollapsible(False)
+            self.viz_splitter.setHandleWidth(6)
+        except Exception:
+            pass
+        self.viz_splitter.addWidget(dsl_group)
+        self.viz_splitter.addWidget(visualization_group)
+        # 将分割器添加到主布局（给予扩展拉伸因子）
+        main_layout.addWidget(self.viz_splitter, 1)
+        # 初始化分割器尺寸（窗口显示后再调整一次）
+        try:
+            QTimer.singleShot(0, self._update_splitter_sizes)
+        except Exception:
+            pass
         
         # 创建状态标签
         self.status_label = QLabel("就绪")
@@ -568,6 +629,8 @@ class TreeView(QWidget):
         self.play_button.clicked.connect(self._toggle_traversal_play)
         self.replay_button.clicked.connect(self._replay_traversal)
         self.speed_combo.currentIndexChanged.connect(self._update_traversal_speed)
+        # 时间轴滑块联动
+        self.timeline_slider.valueChanged.connect(self._scrub_timeline)
         
         # 连接哈夫曼动画定时器
         self.huffman_animation_timer.timeout.connect(self._animate_huffman_build)
@@ -582,6 +645,14 @@ class TreeView(QWidget):
         self.dsl_clear_button.clicked.connect(self._clear_dsl_input)
         if hasattr(self.dsl_input_line, 'returnPressed'):
             self.dsl_input_line.returnPressed.connect(self._execute_dsl_command)
+
+    def _init_dsl_console_enhancements(self):
+        """初始化 DSL 控制台增强功能：历史导航"""
+        # 历史导航（Up/Down）
+        try:
+            self.dsl_input_line.installEventFilter(self)
+        except Exception:
+            pass
     
     # 新增：DSL命令执行与输出方法
     def _execute_dsl_command(self):
@@ -597,6 +668,12 @@ class TreeView(QWidget):
         self.dsl_command_triggered.emit(cmd)
         # 清空输入框
         self.dsl_input_line.clear()
+        # 追加到历史并重置索引（指向末尾之后）
+        try:
+            self._dsl_history.append(cmd)
+            self._dsl_hist_idx = len(self._dsl_history)
+        except Exception:
+            pass
     
     def _clear_dsl_input(self):
         """清空DSL输入与控制台"""
@@ -608,6 +685,58 @@ class TreeView(QWidget):
         """在本视图的控制台追加消息"""
         if hasattr(self, 'dsl_output'):
             self.dsl_output.appendPlainText(message)
+
+    def eventFilter(self, obj, event):
+        """捕获输入框的上下键进行历史导航"""
+        try:
+            if obj is self.dsl_input_line and event.type() == QEvent.KeyPress:
+                key = event.key()
+                if key == Qt.Key_Up:
+                    if self._dsl_history:
+                        self._dsl_hist_idx = max(0, self._dsl_hist_idx - 1)
+                        self.dsl_input_line.setText(self._dsl_history[self._dsl_hist_idx])
+                        self.dsl_input_line.setCursorPosition(len(self.dsl_input_line.text()))
+                    return True
+                elif key == Qt.Key_Down:
+                    if self._dsl_history:
+                        self._dsl_hist_idx = min(len(self._dsl_history), self._dsl_hist_idx + 1)
+                        if self._dsl_hist_idx == len(self._dsl_history):
+                            self.dsl_input_line.clear()
+                        else:
+                            self.dsl_input_line.setText(self._dsl_history[self._dsl_hist_idx])
+                            self.dsl_input_line.setCursorPosition(len(self.dsl_input_line.text()))
+                    return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
+
+    # ---- 布局自适应：窗口化时减小 DSL 控制台高度，增大可视化区域 ----
+    def _update_splitter_sizes(self):
+        try:
+            h = max(300, int(self.viz_splitter.height()))
+        except Exception:
+            h = 600
+        is_max = False
+        try:
+            is_max = bool(self.window().isMaximized())
+        except Exception:
+            is_max = False
+        if is_max:
+            top = min(320, int(h * 0.30))
+        else:
+            top = min(220, int(h * 0.20))
+        bottom = max(100, h - top)
+        try:
+            self.viz_splitter.setSizes([top, bottom])
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        try:
+            self._update_splitter_sizes()
+        except Exception:
+            pass
 
     def set_structure_selection(self, structure_type):
         """程序化切换结构类型至指定值且不触发视图的 change_structure 信号。
@@ -766,6 +895,18 @@ class TreeView(QWidget):
                 self.play_button.setText("播放")
             if hasattr(self, 'replay_button'):
                 self.replay_button.setEnabled(False)
+            # 重置时间轴滑块
+            if hasattr(self, 'timeline_slider'):
+                try:
+                    self._updating_slider = True
+                    self.timeline_slider.setEnabled(False)
+                    self.timeline_slider.setMinimum(0)
+                    self.timeline_slider.setMaximum(0)
+                    self.timeline_slider.setValue(0)
+                except Exception:
+                    pass
+                finally:
+                    self._updating_slider = False
         except Exception:
             pass
         
@@ -897,6 +1038,18 @@ class TreeView(QWidget):
         
         # 更新状态
         self.status_label.setText(f"已清空{self.structure_combo.currentText()}")
+        # 重置时间轴滑块
+        if hasattr(self, 'timeline_slider'):
+            try:
+                self._updating_slider = True
+                self.timeline_slider.setEnabled(False)
+                self.timeline_slider.setMinimum(0)
+                self.timeline_slider.setMaximum(0)
+                self.timeline_slider.setValue(0)
+            except Exception:
+                pass
+            finally:
+                self._updating_slider = False
     
     def _insert_node(self):
         """插入节点"""
@@ -1323,6 +1476,8 @@ class TreeView(QWidget):
             # 更新高亮节点
             if self.canvas.current_traversal_index >= 0 and self.canvas.current_traversal_index < len(self.canvas.node_id_map):
                 self.canvas.highlighted_nodes = [self.canvas.node_id_map[self.canvas.current_traversal_index]]
+                # 同步时间轴滑块位置
+                self._sync_slider_with_index()
                 
                 # 更新状态标签
                 if self.canvas.traversal_type in ("bst_insert", "bst_delete"):
@@ -1378,6 +1533,8 @@ class TreeView(QWidget):
             # 更新高亮节点
             if self.canvas.current_traversal_index < len(self.canvas.node_id_map):
                 self.canvas.highlighted_nodes = [self.canvas.node_id_map[self.canvas.current_traversal_index]]
+                # 同步时间轴滑块位置
+                self._sync_slider_with_index()
                 
                 # 更新状态标签
                 if self.canvas.traversal_type in ("bst_insert", "bst_delete"):
@@ -1538,6 +1695,8 @@ class TreeView(QWidget):
         if node_ids and len(node_ids) > 0:
             self.canvas.highlighted_nodes = [node_ids[0]]
             self.canvas.current_traversal_index = 0
+            # 配置时间轴滑块范围与当前位置
+            self._configure_timeline_slider()
             self.status_label.setText(f"{traversal_name}遍历步骤: 1/{len(path)}")
             # 强制重绘画布
             self.canvas.update()
@@ -2255,6 +2414,11 @@ class TreeView(QWidget):
         
         # 更新画布数据
         self.canvas.update_data(visualization_data)
+        # 同步时间轴滑块范围与当前步骤（哈夫曼构建）
+        try:
+            self._configure_timeline_slider()
+        except Exception:
+            pass
     
     def _show_avl_delete_step(self, step_index):
         """显示 AVL 删除动画的某一步（兼容多种快照结构并计算坐标）"""
@@ -2656,6 +2820,18 @@ class TreeView(QWidget):
                         self.next_step_button.setEnabled(False)
                     if hasattr(self, 'play_button'):
                         self.play_button.setText("播放")
+                    # 重置时间轴滑块
+                    if hasattr(self, 'timeline_slider'):
+                        self._updating_slider = True
+                        try:
+                            self.timeline_slider.setEnabled(False)
+                            self.timeline_slider.setMinimum(0)
+                            self.timeline_slider.setMaximum(0)
+                            self.timeline_slider.setValue(0)
+                        except Exception:
+                            pass
+                        finally:
+                            self._updating_slider = False
                 except Exception:
                     pass
                 if hasattr(self, 'status_label'):
@@ -3014,8 +3190,138 @@ class TreeView(QWidget):
 
     def _update_traversal_speed(self):
         """更新速度设置"""
+        try:
+            if hasattr(self, 'speed_combo') and hasattr(self, 'speed_value_label'):
+                self.speed_value_label.setText(self.speed_combo.currentText())
+        except Exception:
+            pass
         if self.traversal_is_playing:
             self.traversal_play_timer.start(self._current_traversal_interval_ms())
+
+    def _configure_timeline_slider(self):
+        """根据当前遍历步骤配置时间轴滑块范围与当前位置"""
+        try:
+            if not hasattr(self, 'timeline_slider'):
+                return
+            # 若处于哈夫曼构建动画场景，则以构建步骤驱动时间轴
+            if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+                total = len(self.huffman_build_steps)
+                cur = max(0, getattr(self, 'current_build_step', 0))
+            else:
+                total = len(self.canvas.node_id_map) if hasattr(self.canvas, 'node_id_map') else 0
+                cur = max(0, getattr(self.canvas, 'current_traversal_index', 0))
+            self._updating_slider = True
+            self.timeline_slider.setEnabled(total > 0)
+            self.timeline_slider.setMinimum(0)
+            self.timeline_slider.setMaximum(max(0, total - 1))
+            self.timeline_slider.setValue(cur)
+        except Exception:
+            pass
+        finally:
+            self._updating_slider = False
+
+    def _sync_slider_with_index(self):
+        """在索引变更后同步滑块位置，避免递归触发"""
+        try:
+            if not hasattr(self, 'timeline_slider'):
+                return
+            if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
+                return
+            self._updating_slider = True
+            self.timeline_slider.setEnabled(True)
+            self.timeline_slider.setMinimum(0)
+            self.timeline_slider.setMaximum(max(0, len(self.canvas.node_id_map) - 1))
+            self.timeline_slider.setValue(max(0, self.canvas.current_traversal_index))
+        except Exception:
+            pass
+        finally:
+            self._updating_slider = False
+
+    def _scrub_timeline(self, value):
+        """拖动时间轴滑块以跳转到指定遍历步骤"""
+        try:
+            if getattr(self, '_updating_slider', False):
+                return
+            # 支持哈夫曼构建动画的时间轴拖动
+            if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
+                # 拖动时暂停哈夫曼自动播放，避免相互竞态
+                try:
+                    if self.huffman_animation_timer.isActive():
+                        self.huffman_animation_timer.stop()
+                    if hasattr(self, 'play_button'):
+                        self.play_button.setText("播放")
+                except Exception:
+                    pass
+                steps = len(self.huffman_build_steps)
+                idx = int(value)
+                idx = max(0, min(idx, steps - 1))
+                if idx == getattr(self, 'current_build_step', 0):
+                    return
+                self.current_build_step = idx
+                self._show_huffman_step(idx)
+                try:
+                    if hasattr(self, 'prev_step_button'):
+                        self.prev_step_button.setEnabled(idx > 0)
+                    if hasattr(self, 'next_step_button'):
+                        self.next_step_button.setEnabled(idx < steps - 1)
+                except Exception:
+                    pass
+                return
+            if not hasattr(self.canvas, 'node_id_map') or not self.canvas.node_id_map:
+                return
+            # 拖动时暂停自动播放，避免相互竞态
+            self._pause_traversal_playback()
+            # 夹取有效范围
+            idx = int(value)
+            idx = max(0, min(idx, len(self.canvas.node_id_map) - 1))
+            self.canvas.current_traversal_index = idx
+            self.canvas.highlighted_nodes = [self.canvas.node_id_map[idx]]
+
+            # 更新状态标签（针对不同遍历类型文案）
+            try:
+                if self.canvas.traversal_type in ("bst_insert", "bst_delete"):
+                    action_cn = "BST插入路径步骤" if self.canvas.traversal_type == "bst_insert" else "BST删除路径步骤"
+                    self.status_label.setText(f"{action_cn}: {idx + 1}/{len(self.canvas.node_id_map)}")
+                elif self.canvas.traversal_type == "search":
+                    self.status_label.setText(f"搜索步骤: {idx + 1}/{len(self.canvas.traversal_order)}")
+                elif self.canvas.traversal_type in ("huffman_encode", "huffman_decode"):
+                    info = None
+                    try:
+                        if hasattr(self, 'huffman_step_info') and self.huffman_step_info:
+                            info = self.huffman_step_info[idx]
+                    except Exception:
+                        info = None
+                    if self.canvas.traversal_type == "huffman_encode" and info:
+                        self.status_label.setText(
+                            f"哈夫曼编码：字符 '{info.get('char')}' 步骤 {info.get('step_in_char')}/{info.get('total_char_steps')}（位 {info.get('bit')}）"
+                        )
+                    elif self.canvas.traversal_type == "huffman_decode" and info:
+                        if info.get('recognized_char'):
+                            self.status_label.setText(
+                                f"哈夫曼解码：位 {info.get('bit')}，累积 {info.get('accum_code')} -> 识别 '{info.get('recognized_char')}'"
+                            )
+                        else:
+                            self.status_label.setText(
+                                f"哈夫曼解码：位 {info.get('bit')}，累积 {info.get('accum_code')}"
+                            )
+                    else:
+                        self.status_label.setText(f"哈夫曼路径步骤: {idx + 1}/{len(self.canvas.node_id_map)}")
+                else:
+                    traversal_name = {
+                        "preorder": "前序遍历",
+                        "inorder": "中序遍历",
+                        "postorder": "后序遍历",
+                        "levelorder": "层序遍历"
+                    }.get(self.canvas.traversal_type, self.canvas.traversal_type)
+                    self.status_label.setText(f"{traversal_name}遍历步骤: {idx + 1}/{len(self.canvas.traversal_order)}")
+            except Exception:
+                pass
+
+            # 重绘画布以反映新高亮
+            self.canvas.update()
+            QApplication.processEvents()
+        except Exception:
+            pass
 
 
 class TreeCanvas(QWidget):
@@ -3027,6 +3333,11 @@ class TreeCanvas(QWidget):
         
         # 设置最小尺寸，允许画布根据内容自适应延伸
         self.setMinimumSize(800, 600)  # 设置初始最小尺寸
+        # 开启鼠标跟踪用于悬停反馈
+        try:
+            self.setMouseTracking(True)
+        except Exception:
+            pass
         
         # 初始化数据
         self.data = None
@@ -3035,7 +3346,21 @@ class TreeCanvas(QWidget):
         # 节点样式
         self.node_radius = 20
         self.level_height = 80
-        self.highlighted_nodes = []
+        # 高亮相关（改为属性以触发渐隐渐显动画）
+        self._highlighted_nodes = []
+        self.highlight_opacity = 1.0
+        self._highlight_anim = None
+        
+        # 交互：缩放与平移
+        self.zoom_scale = 1.0
+        self.pan_tx = 0
+        self.pan_ty = 0
+        self._panning = False
+        self._last_mouse_pos = None
+        
+        # 交互：悬停与选择反馈
+        self.hovered_node_id = None
+        self.selected_node_id = None
         
         # 遍历相关
         self.traversal_order = []
@@ -3046,6 +3371,26 @@ class TreeCanvas(QWidget):
         self.animation_timer = QTimer()
         self.animation_timer.timeout.connect(self._animate_traversal)
         self.animation_speed = 500  # 动画速度（毫秒）
+
+    # ---- 字体缩放工具 ----
+    def _font_scale(self):
+        try:
+            w = int(self.window().width())
+        except Exception:
+            w = int(self.width())
+        scale = w / 1000.0
+        if scale < 1.0:
+            scale = 1.0
+        if scale > 1.6:
+            scale = 1.6
+        return scale
+
+    def _scaled_font(self, base_pt):
+        try:
+            size_pt = int(round((base_pt or 12) * self._font_scale()))
+        except Exception:
+            size_pt = int(base_pt or 12)
+        return QFont("Arial", size_pt)
     
     def _animate_traversal(self):
         """遍历动画处理函数"""
@@ -3093,6 +3438,45 @@ class TreeCanvas(QWidget):
         # 重置动画状态
         self.current_traversal_index = -1
         self.highlighted_nodes = []
+
+    @property
+    def highlighted_nodes(self):
+        return self._highlighted_nodes
+
+    @highlighted_nodes.setter
+    def highlighted_nodes(self, ids):
+        # 设置新的高亮节点并启动渐隐渐显动画
+        self._highlighted_nodes = ids or []
+        self._start_highlight_fade()
+
+    def _start_highlight_fade(self):
+        # 渐隐渐显：从0到1，缓动曲线使过渡自然
+        try:
+            if self._highlight_anim:
+                self._highlight_anim.stop()
+            # 若无高亮节点，直接置为透明并刷新
+            if not self._highlighted_nodes:
+                self.highlight_opacity = 0.0
+                self.update()
+                return
+            self.highlight_opacity = 0.0
+            anim = QVariantAnimation(self)
+            anim.setDuration(400)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            def on_value(v):
+                self.highlight_opacity = float(v)
+                # 局部重绘可进一步优化，这里先直接刷新
+                self.update()
+            anim.valueChanged.connect(on_value)
+            # 保存引用防止被GC
+            self._highlight_anim = anim
+            anim.start()
+        except Exception:
+            # 兜底：不影响原有绘制
+            self.highlight_opacity = 1.0
+            self.update()
     
     def update_data(self, data):
         """更新画布数据
@@ -3161,22 +3545,37 @@ class TreeCanvas(QWidget):
         return list(reversed(path_rev))
 
     def mousePressEvent(self, event):
-        # 命中测试，检测是否点击到某个节点
+        # 新增：左键选择/拖拽平移；中键拖拽
+        try:
+            if event.button() in (Qt.LeftButton, Qt.MiddleButton):
+                if not self.data or len(self.data) == 0:
+                    return
+                if event.button() == Qt.LeftButton:
+                    sx, sy = self._to_scene(event.pos())
+                    clicked_node = self._hit_node((sx, sy))
+                    if clicked_node:
+                        self.selected_node_id = clicked_node.get('id')
+                        self.update()
+                        return
+                # 开始拖拽平移
+                self._panning = True
+                self._last_mouse_pos = event.pos()
+                try:
+                    self.setCursor(Qt.ClosedHandCursor)
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
+        # 仅响应鼠标右键打开上下文菜单
         if not self.data or len(self.data) == 0:
             return
+        if event.button() != Qt.RightButton:
+            return
 
-        click_pos = event.pos()
-        start_y = 50
-        clicked = None
-        for node in self.data:
-            x = int(node.get('x_pos', 0.5) * self.width())
-            y = int(start_y + node.get('level', 0) * self.level_height)
-            dx = click_pos.x() - x
-            dy = click_pos.y() - y
-            if dx * dx + dy * dy <= self.node_radius * self.node_radius:
-                clicked = node
-                break
-
+        # 使用统一命中测试（兼容缩放/平移与字体缩放）
+        sx, sy = self._to_scene(event.pos())
+        clicked = self._hit_node((sx, sy))
         if not clicked:
             return
 
@@ -3320,13 +3719,20 @@ class TreeCanvas(QWidget):
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(QColor(100, 100, 100)))
-            painter.setFont(QFont("Arial", 14))
+            painter.setFont(self._scaled_font(14))
             painter.drawText(self.rect(), Qt.AlignCenter, "暂无数据可显示")
             return
         
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
         
+        # 应用平移与缩放变换（平滑缩放与拖拽平移）
+        try:
+            painter.translate(self.pan_tx, self.pan_ty)
+            painter.scale(self.zoom_scale, self.zoom_scale)
+        except Exception:
+            pass
 
         
         self._draw_tree(painter)
@@ -3338,8 +3744,15 @@ class TreeCanvas(QWidget):
             painter: QPainter对象
         """
         # 设置字体
-        font = QFont("Arial", 10)
+        font = self._scaled_font(10)
         painter.setFont(font)
+        # 根据字体缩放比例同步调整节点半径、层高与起始偏移
+        try:
+            scale = self._font_scale()
+        except Exception:
+            scale = 1.0
+        node_r = int(round(self.node_radius * scale))
+        level_h = int(round(self.level_height * scale))
         
         # 检查数据是否有效
         if not self.data:
@@ -3348,7 +3761,7 @@ class TreeCanvas(QWidget):
         try:
             # 计算树的高度和宽度
             max_level = max([node.get("level", 0) for node in self.data]) if self.data else 0
-            tree_height = (max_level + 1) * self.level_height
+            tree_height = (max_level + 1) * level_h
             
             # 计算所需的画布尺寸
             required_width = (len(self.data) * 100) + 200  # 根据节点数量估算宽度
@@ -3361,7 +3774,7 @@ class TreeCanvas(QWidget):
             
             # 计算画布中心点
             center_x = self.width() // 2
-            start_y = 50
+            start_y = int(50 * scale)
             
             # 首先绘制边
             for node in self.data:
@@ -3376,10 +3789,10 @@ class TreeCanvas(QWidget):
                     if parent:
                         # 计算节点位置
                         parent_x = int(parent.get("x_pos", 0.5) * self.width())
-                        parent_y = int(start_y + parent.get("level", 0) * self.level_height)
+                        parent_y = int(start_y + parent.get("level", 0) * level_h)
                         
                         node_x = int(node.get("x_pos", 0.5) * self.width())
-                        node_y = int(start_y + node.get("level", 0) * self.level_height)
+                        node_y = int(start_y + node.get("level", 0) * level_h)
                         
                         # 绘制连接线
                         painter.setPen(QPen(Qt.black, 2))
@@ -3394,15 +3807,23 @@ class TreeCanvas(QWidget):
             for node in self.data:
                 # 计算节点位置
                 x = int(node.get("x_pos", 0.5) * self.width())
-                y = int(start_y + node.get("level", 0) * self.level_height)
+                y = int(start_y + node.get("level", 0) * level_h)
                 
-                # 设置节点颜色
+                # 设置节点颜色（含悬停高亮）
+                is_hovered = (node.get("id") == getattr(self, 'hovered_node_id', None))
                 if node.get("is_pending"):
                     # 待插入节点 - 使用虚线边框和半透明填充
                     painter.setBrush(QBrush(QColor(255, 165, 0, 128)))  # 橙色半透明
                 elif node.get("id") in self.highlighted_nodes:
-                    # 高亮节点
-                    painter.setBrush(QBrush(QColor(255, 200, 0)))
+                    # 高亮节点（加入渐隐渐显不透明度）
+                    try:
+                        alpha = max(0, min(255, int(60 + 195 * self.highlight_opacity)))
+                    except Exception:
+                        alpha = 255
+                    painter.setBrush(QBrush(QColor(255, 200, 0, alpha)))
+                elif is_hovered:
+                    # 悬停节点：浅蓝底以反馈
+                    painter.setBrush(QBrush(QColor(230, 245, 255)))
                 else:
                     # 普通节点
                     painter.setBrush(QBrush(QColor(200, 240, 255)))
@@ -3418,7 +3839,7 @@ class TreeCanvas(QWidget):
                             order_text = str(index + 1)
                             painter.setPen(QPen(Qt.red, 2))
                             # 将数字放在节点的右上方，完全在节点外部
-                            painter.drawText(x + self.node_radius + 5, y - self.node_radius - 5, order_text)
+                            painter.drawText(x + node_r + int(5 * scale), y - node_r - int(5 * scale), order_text)
                 
                 # 绘制节点圆
                 if node.get("is_pending"):
@@ -3426,47 +3847,131 @@ class TreeCanvas(QWidget):
                     pen = QPen(QColor(255, 140, 0), 2)  # 橙色边框
                     pen.setStyle(Qt.DashLine)  # 虚线样式
                     painter.setPen(pen)
+                elif is_hovered:
+                    # 悬停节点：蓝色描边
+                    painter.setPen(QPen(QColor(30, 144, 255), 2))
                 else:
                     painter.setPen(QPen(Qt.black, 2))
-                painter.drawEllipse(x - self.node_radius, y - self.node_radius, 
-                                  2 * self.node_radius, 2 * self.node_radius)
+                painter.drawEllipse(x - node_r, y - node_r, 
+                                  2 * node_r, 2 * node_r)
                 
                 # 绘制节点值
                 painter.setPen(Qt.black)
                 value_text = str(node.get("value", ""))
                 # 计算文本宽度，以便居中显示
                 text_width = painter.fontMetrics().width(value_text)
-                painter.drawText(x - text_width // 2, y + 5, value_text)
+                painter.drawText(x - text_width // 2, y + int(5 * scale), value_text)
                 
                 # 如果是待插入节点，添加标签
                 if node.get("is_pending"):
                     painter.setPen(QPen(QColor(255, 140, 0), 2))
                     label_text = "待插入"
                     label_width = painter.fontMetrics().width(label_text)
-                    painter.drawText(x - label_width // 2, y + self.node_radius + 20, label_text)
+                    painter.drawText(x - label_width // 2, y + node_r + int(20 * scale), label_text)
                 
                 # 如果是哈夫曼树，显示权重/频率
                 if self.structure_type == "huffman_tree" and "weight" in node:
                     weight_text = f"({node['weight']})"
                     # 在节点下方显示权重
                     weight_width = painter.fontMetrics().width(weight_text)
-                    painter.drawText(x - weight_width // 2, y + self.node_radius + 15, weight_text)
+                    painter.drawText(x - weight_width // 2, y + node_r + int(15 * scale), weight_text)
                 elif self.structure_type == "huffman_tree" and "freq" in node:
                     freq_text = f"({node['freq']})"
                     # 在节点下方显示频率
                     freq_width = painter.fontMetrics().width(freq_text)
-                    painter.drawText(x - freq_width // 2, y + self.node_radius + 15, freq_text)
+                    painter.drawText(x - freq_width // 2, y + node_r + int(15 * scale), freq_text)
                 
                 # 如果有编码，显示编码
                 if "code" in node:
                     code_text = node["code"]
                     # 在节点上方显示编码
                     code_width = painter.fontMetrics().width(code_text)
-                    painter.drawText(x - code_width // 2, y - self.node_radius - 5, code_text)
+                    painter.drawText(x - code_width // 2, y - node_r - int(5 * scale), code_text)
         except Exception as e:
             # 绘制节点出错时静默处理
             pass
             return
+
+    # ------- 交互：缩放、平移、悬停与点击辅助 -------
+    def _to_scene(self, pos):
+        """将窗口坐标转换为场景坐标（考虑当前平移与缩放）"""
+        try:
+            x = (pos.x() - self.pan_tx) / (self.zoom_scale if self.zoom_scale != 0 else 1.0)
+            y = (pos.y() - self.pan_ty) / (self.zoom_scale if self.zoom_scale != 0 else 1.0)
+            return x, y
+        except Exception:
+            return pos.x(), pos.y()
+
+    def _hit_node(self, scene_pos):
+        """命中测试，返回场景坐标下点击到的节点（或None）"""
+        try:
+            xw, yw = scene_pos
+            try:
+                scale = self._font_scale()
+            except Exception:
+                scale = 1.0
+            node_r = int(round(self.node_radius * scale))
+            level_h = int(round(self.level_height * scale))
+            start_y = int(50 * scale)
+            for node in (self.data or []):
+                x = int(node.get('x_pos', 0.5) * self.width())
+                y = int(start_y + node.get('level', 0) * level_h)
+                dx = xw - x
+                dy = yw - y
+                if dx * dx + dy * dy <= node_r * node_r:
+                    return node
+            return None
+        except Exception:
+            return None
+
+    def mouseMoveEvent(self, event):
+        try:
+            if self._panning and self._last_mouse_pos is not None:
+                d = event.pos() - self._last_mouse_pos
+                self.pan_tx += d.x()
+                self.pan_ty += d.y()
+                self._last_mouse_pos = event.pos()
+                self.update()
+            else:
+                sx, sy = self._to_scene(event.pos())
+                n = self._hit_node((sx, sy))
+                self.hovered_node_id = n.get('id') if n else None
+                self.update()
+        except Exception:
+            pass
+
+    def mouseReleaseEvent(self, event):
+        try:
+            if event.button() in (Qt.LeftButton, Qt.MiddleButton):
+                self._panning = False
+                self._last_mouse_pos = None
+                try:
+                    self.setCursor(Qt.ArrowCursor)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def wheelEvent(self, event):
+        try:
+            delta = event.angleDelta().y()
+            if delta == 0:
+                return
+            factor = pow(1.0015, delta)
+            new_scale = max(0.5, min(3.0, self.zoom_scale * factor))
+            anchor = event.pos()
+            s1 = self.zoom_scale
+            s2 = new_scale
+            tx1 = self.pan_tx
+            ty1 = self.pan_ty
+            xs = (anchor.x() - tx1) / (s1 if s1 != 0 else 1.0)
+            ys = (anchor.y() - ty1) / (s1 if s1 != 0 else 1.0)
+            self.zoom_scale = s2
+            self.pan_tx = anchor.x() - s2 * xs
+            self.pan_ty = anchor.y() - s2 * ys
+            self.update()
+        except Exception:
+            pass
     
     # 保留更健壮的 AVL 动画处理函数定义，删除重复的仅构建版本
     # （定时器连接至前文的通用 _animate_avl_build，支持构建与删除两种步骤）

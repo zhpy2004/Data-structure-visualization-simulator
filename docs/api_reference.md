@@ -93,6 +93,8 @@
 - `save_structure(self)` - 保存当前数据结构
 - `load_structure(self)` - 加载数据结构
 
+（说明）控制器会通过信号与主窗口交互，保存/加载由视图触发的请求。
+
 ### LinearController
 - `__init__(self, view)` - 初始化线性结构控制器
 - `create_structure(self, structure_type, values)` - 创建线性结构
@@ -129,6 +131,15 @@
 - `_init_ui(self)` - 初始化UI
 - `_connect_signals(self)` - 连接信号和槽
 - `show_message(self, message)` - 显示消息
+- `_show_history_dialog(self, title, context)` - 显示历史记录对话框
+  - `context`：`"linear"` / `"tree"` / `None`（合并视图）
+  - 说明：使用 HTML 富文本渲染历史记录，包含时间戳（仅 `HH:MM:SS`）、上下文标签（合并视图下显示 `[linear]`、`[tree]`、`[global]`），动词加粗紫色、数字绿色、引号文本橙色；等宽字体字号 20px；只读但支持复制
+
+菜单项（菜单栏）
+- `历史`（同级于 `文件`、`帮助`）
+  - `查看线性历史` → 打开 `context="linear"` 的历史对话框
+  - `查看树形历史` → 打开 `context="tree"` 的历史对话框
+  - `查看全部历史` → 打开合并视图（`context=None`）
 
 ### LinearView
 - `__init__(self)` - 初始化线性结构视图
@@ -167,3 +178,19 @@
 - `animate_avl_build(self, steps, canvas)` - 动画展示AVL树构建过程
 - `draw_avl_rotation(self, rotation_data, canvas)` - 绘制AVL树旋转操作
 - `show_balance_factors(self, tree_data, canvas)` - 显示节点平衡因子
+
+## 服务 (Services)
+
+### OperationRecorder
+- `record_dsl(dsl_text, context, success=True, source="dsl")` - 记录一条 DSL 操作到指定上下文（`linear`/`tree`/`global`）
+- `record_linear_action(action_type, params, structure_type, executed=True)` - 将线性结构界面按钮操作映射为 DSL 并记录
+- `record_tree_action(action_type, params, structure_type, executed=True)` - 将树形结构界面按钮操作映射为 DSL 并记录
+- `get_history(context)` → `List[str]` - 获取指定上下文的历史 DSL 文本列表（按边界过滤）
+- `get_history_text(context)` → `str` - 获取指定上下文的历史 DSL 文本（按行拼接）
+- `get_history_entries(context)` → `List[Dict[str, Any]]` - 获取带时间戳与上下文的历史条目（字段：`dsl`、`ts`、`ctx`），合并视图按时间排序并包含最近的全局 `clear` 作为边界（若适用）
+- `get_history_text_with_ts(context)` → `str` - 获取带时间戳（仅 `HH:MM:SS`）的历史文本；合并视图在每行前显示 `[ctx]` 标签
+
+说明与边界规则：
+- 历史按“边界”截取：全局 `clear` 或当前上下文的 `create/build` 事件之后的记录
+- 合并视图会合并 `linear` 与 `tree` 的记录并按时间排序；若较新的全局 `clear` 出现在边界之后，则作为边界行包含在合并视图中
+- 记录仅保存在内存中，应用重启后清空

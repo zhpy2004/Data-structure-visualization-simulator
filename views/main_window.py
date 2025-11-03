@@ -8,12 +8,16 @@
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
                              QLineEdit, QTextEdit, QMessageBox, QSplitter,
-                             QAction, QToolBar, QStatusBar, QGroupBox)
+                             QAction, QToolBar, QStatusBar, QGroupBox, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 
 from views.linear_view import LinearView
 from views.tree_view import TreeView
+from utils.theme import get_app_qss
+from services.operation_recorder import OperationRecorder
+import re
+import html as _html
 
 
 class MainWindow(QMainWindow):
@@ -32,6 +36,13 @@ class MainWindow(QMainWindow):
         # 设置窗口属性
         self.setWindowTitle("数据结构可视化模拟器")
         self.setMinimumSize(1000, 700)
+        # 应用统一主题样式
+        # 当前基础字体像素（用于自适应缩放）
+        self._current_base_font_px = 13
+        try:
+            self.setStyleSheet(get_app_qss(self._current_base_font_px))
+        except Exception:
+            pass
         
         # 创建子视图
         self.linear_view = LinearView()
@@ -42,6 +53,12 @@ class MainWindow(QMainWindow):
         
         # 连接信号和槽
         self._connect_signals()
+
+        # 初始化一次字体缩放（在窗口显示或尺寸变化后会再次更新）
+        try:
+            self._update_font_scale_by_window()
+        except Exception:
+            pass
     
     def _init_ui(self):
         """初始化UI"""
@@ -74,35 +91,12 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("就绪")
         
-        # 创建工具栏
-        self._create_toolbar()
+        # 移除包含“新建/清空/帮助”的工具栏行
         
         # 创建菜单栏
         self._create_menu()
     
-    def _create_toolbar(self):
-        """创建工具栏"""
-        # 主工具栏
-        main_toolbar = QToolBar("主工具栏")
-        self.addToolBar(main_toolbar)
-        
-        # 新建操作
-        new_action = QAction("新建", self)
-        new_action.setStatusTip("创建新的数据结构")
-        main_toolbar.addAction(new_action)
-        
-        # 清空操作
-        clear_action = QAction("清空", self)
-        clear_action.setStatusTip("清空当前数据结构")
-        main_toolbar.addAction(clear_action)
-        
-        # 添加分隔符
-        main_toolbar.addSeparator()
-        
-        # 帮助操作
-        help_action = QAction("帮助", self)
-        help_action.setStatusTip("显示帮助信息")
-        main_toolbar.addAction(help_action)
+    # 已删除工具栏创建，避免在界面顶部显示“新建/清空/帮助”一行
     
     def _create_menu(self):
         """创建菜单栏"""
@@ -138,12 +132,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # 编辑菜单
-        edit_menu = menu_bar.addMenu("编辑")
-        
-        # 清空操作
-        clear_action = QAction("清空", self)
-        edit_menu.addAction(clear_action)
+        # 移除“编辑”菜单（包含清空操作），不再显示编辑栏
         
         # 帮助菜单
         help_menu = menu_bar.addMenu("帮助")
@@ -157,6 +146,27 @@ class MainWindow(QMainWindow):
         about_action = QAction("关于", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+        # 历史菜单（同文件、帮助同层）
+        history_menu = menu_bar.addMenu("历史")
+
+        # 查看线性历史
+        linear_history_action = QAction("查看线性历史", self)
+        linear_history_action.setStatusTip("查看线性结构的 DSL 操作历史")
+        linear_history_action.triggered.connect(lambda: self._show_history_dialog("线性历史", "linear"))
+        history_menu.addAction(linear_history_action)
+
+        # 查看树形历史
+        tree_history_action = QAction("查看树形历史", self)
+        tree_history_action.setStatusTip("查看树形结构的 DSL 操作历史")
+        tree_history_action.triggered.connect(lambda: self._show_history_dialog("树形历史", "tree"))
+        history_menu.addAction(tree_history_action)
+
+        # 查看全部历史
+        all_history_action = QAction("查看全部历史", self)
+        all_history_action.setStatusTip("查看线性与树形的合并历史")
+        all_history_action.triggered.connect(lambda: self._show_history_dialog("全部历史", None))
+        history_menu.addAction(all_history_action)
     
     def _connect_signals(self):
         """连接信号和槽"""
@@ -240,6 +250,80 @@ class MainWindow(QMainWindow):
         """
         
         QMessageBox.about(self, "关于", about_text)
+
+    def _show_history_dialog(self, title, context):
+        """显示历史记录对话框
+
+        Args:
+            title: 对话框标题
+            context: 上下文（"linear"、"tree" 或 None 表示全部）
+        """
+        try:
+            entries = OperationRecorder.get_history_entries(context)
+        except Exception:
+            entries = []
+
+        if not entries:
+            html_text = "<p style='color:#888'>暂无历史记录</p>"
+        else:
+            # Colors
+            color_ts = "#888"
+            color_ctx_linear = "#1E90FF"
+            color_ctx_tree = "#2ECC71"
+            color_ctx_global = "#F39C12"
+            color_verb = "#8E44AD"
+            color_num = "#27AE60"
+            color_quote = "#D35400"
+
+            def ctx_color(ctx):
+                if ctx == "linear":
+                    return color_ctx_linear
+                if ctx == "tree":
+                    return color_ctx_tree
+                return color_ctx_global
+
+            def highlight_dsl(dsl: str) -> str:
+                # Escape HTML first
+                esc = _html.escape(dsl)
+                # Highlight quoted text
+                esc = re.sub(r"(&quot;.*?&quot;)", lambda m: f"<span style='color:{color_quote}'>{m.group(1)}</span>", esc)
+                # Highlight numbers
+                esc = re.sub(r"\b(\d+)\b", lambda m: f"<span style='color:{color_num}'>{m.group(1)}</span>", esc)
+                # Highlight first verb at start
+                verb = (dsl.strip().split()[0]).lower() if dsl.strip() else ""
+                if verb:
+                    esc = re.sub(rf"^({re.escape(verb)})\b", lambda m: f"<span style='color:{color_verb};font-weight:600'>{m.group(1)}</span>", esc)
+                return esc
+
+            lines = [
+                "<div style='font-family:Consolas,Menlo,Monaco,monospace;font-size:20px;line-height:1.6'>"
+            ]
+            for e in entries:
+                ts = OperationRecorder._format_ts(e.get("ts"))
+                ctx = e.get("ctx")
+                dsl = e.get("dsl") or ""
+                ctx_tag = ""
+                if context is None and ctx:
+                    ctx_tag = f" <span style='color:{ctx_color(ctx)}'>[{ctx}]</span>"
+                line = (
+                    f"<span style='color:{color_ts}'>{_html.escape(ts)}</span>"
+                    f"{ctx_tag} "
+                    f"{highlight_dsl(dsl)}"
+                )
+                lines.append(f"<div>{line}</div>")
+            lines.append("</div>")
+            html_text = "".join(lines)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        layout = QVBoxLayout(dlg)
+        view = QTextEdit(dlg)
+        view.setReadOnly(True)
+        view.setAcceptRichText(True)
+        view.setHtml(html_text)
+        layout.addWidget(view)
+        dlg.resize(800, 500)
+        dlg.exec_()
     
     def _save_structure(self):
         """保存当前数据结构"""
@@ -258,3 +342,33 @@ class MainWindow(QMainWindow):
             message: 要显示的消息
         """
         self.status_bar.showMessage(message, 3000)  # 显示3秒
+
+    # ------- 自适应字体缩放 -------
+    def _compute_base_font_px(self):
+        """根据窗口宽度计算基础字体像素大小"""
+        try:
+            w = max(1, int(self.width()))
+        except Exception:
+            w = 1000
+        # 以 1000px 宽度为基准 13px，最大不超过约 20px
+        scale = w / 1000.0
+        target = int(round(13 * max(1.0, min(1.6, scale))))
+        return target
+
+    def _update_font_scale_by_window(self):
+        """当窗口尺寸变化时更新全局样式中的字体大小"""
+        px = self._compute_base_font_px()
+        if px != self._current_base_font_px:
+            self._current_base_font_px = px
+            try:
+                self.setStyleSheet(get_app_qss(px))
+            except Exception:
+                pass
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 依据窗口大小调整全局字体大小
+        try:
+            self._update_font_scale_by_window()
+        except Exception:
+            pass

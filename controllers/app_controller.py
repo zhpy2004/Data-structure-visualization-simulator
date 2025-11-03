@@ -294,14 +294,108 @@ class AppController:
             content = structure_data.get('content')
             
             if tab_index == 0:  # 线性结构
-                # 设置当前结构类型
+                # 先切到对应的线性结构页面（静默切换下拉选项）
+                try:
+                    if hasattr(self.main_window, 'linear_view') and hasattr(self.main_window.linear_view, 'set_structure_selection'):
+                        self.main_window.linear_view.set_structure_selection(structure_type)
+                except Exception:
+                    pass
+                # 设置当前结构类型并加载
                 self.linear_controller.structure_type = structure_type
                 self.linear_controller.load_structure(structure_type, content)
             elif tab_index == 1:  # 树形结构
-                # 设置当前结构类型
+                # 先切到对应的树形结构页面（静默切换下拉选项）
+                try:
+                    if hasattr(self.main_window, 'tree_view') and hasattr(self.main_window.tree_view, 'set_structure_selection'):
+                        self.main_window.tree_view.set_structure_selection(structure_type)
+                except Exception:
+                    pass
+                # 设置当前结构类型并加载
                 self.tree_controller.structure_type = structure_type
                 self.tree_controller.load_structure(structure_type, content)
             
             QMessageBox.information(self.main_window, "加载成功", f"数据结构已从文件加载: {file_path}")
         except Exception as e:
             QMessageBox.critical(self.main_window, "加载失败", f"加载数据时出错: {str(e)}")
+from services.operation_recorder import OperationRecorder
+
+# --- Operation recording wrappers: record DSL and button actions ---
+try:
+    # Wrap DSL command handler to record successful executions
+    if not getattr(AppController, "_oprec_wrapped", False):
+        _orig_dsl = getattr(AppController, "_handle_dsl_command", None)
+        _orig_lin = getattr(AppController, "_handle_linear_action", None)
+        _orig_tree = getattr(AppController, "_handle_tree_action", None)
+
+        def _wrap_dsl(self, dsl_text: str):
+            ctx = getattr(self, "context_target", None)
+            try:
+                res = _orig_dsl(self, dsl_text)
+                # We cannot know success from return; conservatively record on invocation.
+                text = (dsl_text or "").strip()
+                if text:
+                    is_script = "\n" in text or ";" in text
+                    if is_script:
+                        parts = [p.strip() for p in text.replace("\n", ";").split(";")]
+                        for cmd in parts:
+                            if not cmd:
+                                continue
+                            cmd_low = cmd.lower()
+                            rec_ctx = "global" if cmd_low == "clear" else (ctx if ctx in ("linear", "tree") else None)
+                            OperationRecorder.record_dsl(cmd, rec_ctx or "linear", success=True, source="dsl")
+                    else:
+                        cmd_low = text.lower()
+                        rec_ctx = "global" if cmd_low == "clear" else (ctx if ctx in ("linear", "tree") else None)
+                        OperationRecorder.record_dsl(text, rec_ctx or "linear", success=True, source="dsl")
+                return res
+            except Exception:
+                # In case of handler error, still attempt to record the raw text
+                text = (dsl_text or "").strip()
+                if text:
+                    rec_ctx = ctx if ctx in ("linear", "tree") else None
+                    OperationRecorder.record_dsl(text, rec_ctx or "linear", success=False, source="dsl")
+                raise
+
+        def _wrap_linear(self, action_type: str, params: dict):
+            try:
+                res = _orig_lin(self, action_type, params)
+                struct_type = getattr(self.linear_controller, "structure_type", None)
+                current = getattr(self.linear_controller, "current_structure", None)
+                executed = True
+                act = (action_type or "").strip().lower()
+                if act in ("insert", "delete", "remove", "get", "push", "pop", "peek", "clear") and not current:
+                    executed = False
+                OperationRecorder.record_linear_action(action_type, params, struct_type, executed=executed)
+                return res
+            except Exception:
+                struct_type = getattr(self.linear_controller, "structure_type", None)
+                OperationRecorder.record_linear_action(action_type, params, struct_type, executed=False)
+                raise
+
+        def _wrap_tree(self, action_type: str, params: dict):
+            try:
+                res = _orig_tree(self, action_type, params)
+                struct_type = getattr(self.tree_controller, "structure_type", None)
+                current = getattr(self.tree_controller, "current_tree", None)
+                executed = True
+                act = (action_type or "").strip().lower()
+                if act in ("insert", "remove", "delete", "search", "find", "traverse", "encode", "decode", "clear") and not current:
+                    executed = False
+                OperationRecorder.record_tree_action(action_type, params, struct_type, executed=executed)
+                return res
+            except Exception:
+                struct_type = getattr(self.tree_controller, "structure_type", None)
+                OperationRecorder.record_tree_action(action_type, params, struct_type, executed=False)
+                raise
+
+        if callable(_orig_dsl):
+            AppController._handle_dsl_command = _wrap_dsl
+        if callable(_orig_lin):
+            AppController._handle_linear_action = _wrap_linear
+        if callable(_orig_tree):
+            AppController._handle_tree_action = _wrap_tree
+
+        AppController._oprec_wrapped = True
+except Exception:
+    # Non-fatal: recording wrappers are optional
+    pass

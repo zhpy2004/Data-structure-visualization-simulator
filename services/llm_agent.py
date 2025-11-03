@@ -475,3 +475,30 @@ class LLMAgent:
             return f"decode {binary} using huffman"
 
         return None
+from services.operation_recorder import OperationRecorder
+
+# --- Wrap LLMAgent.generate_dsl to include operation history in prompt ---
+try:
+    if not getattr(LLMAgent, "_oprec_prompt_wrapped", False):
+        _orig_gen = getattr(LLMAgent, "generate_dsl", None)
+
+        def _wrap_generate_dsl(self, nl_text: str, context_target=None):
+            # Enrich user message with DSL operation history since last clear/create
+            try:
+                history_text = OperationRecorder.get_history_text(context_target)
+                if history_text:
+                    enriched_nl = (
+                        f"历史（DSL，自最近清空/创建）：\n{history_text}\n---\n{nl_text}"
+                    )
+                else:
+                    enriched_nl = nl_text
+            except Exception:
+                enriched_nl = nl_text
+            return _orig_gen(self, enriched_nl, context_target)
+
+        if callable(_orig_gen):
+            LLMAgent.generate_dsl = _wrap_generate_dsl
+            LLMAgent._oprec_prompt_wrapped = True
+except Exception:
+    # Non-fatal: prompt wrapping optional
+    pass
