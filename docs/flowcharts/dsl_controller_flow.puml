@@ -1,0 +1,19 @@
+@startuml
+title DSLController.process_command
+start
+:接收 command_str 并进行基本规范化;
+if (目标上下文 == linear?) then (yes)
+  :调用 _process_linear_command(command);
+elseif (目标上下文 == tree?) then (yes)
+  :调用 _process_tree_command(command);
+else
+  :按关键字自动判定上下文\n(bst/avl/huffman/binarytree 等);
+  if (判定为 linear?) then (yes)
+    :调用 _process_linear_command(command);
+  else
+    :调用 _process_tree_command(command);
+  endif
+endif
+:根据执行结果向视图/控制器返回成功或错误消息;
+stop
+@enduml

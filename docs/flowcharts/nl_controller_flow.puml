@@ -1,0 +1,12 @@
+@startuml
+title NLController.handle_nl_command
+start
+:接收自然语言文本 + 可选上下文 (linear/tree);
+:调用 LLMAgent.generate_dsl(nl_text, context_target);
+if (生成 DSL 成功?) then (yes)
+  :返回 DSL 文本\n可转交 DSLController 进一步处理;
+else
+  :返回 None 并提示无法生成;
+endif
+stop
+@enduml

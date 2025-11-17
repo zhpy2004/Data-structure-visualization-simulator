@@ -1,0 +1,13 @@
+@startuml
+title AppController._handle_dsl_command / _handle_dsl_result
+start
+:接收 DSL 文本 (来自视图/NL/DSL 控制台);
+:_wrap_dsl(dsl_text) -> 附加上下文与 OperationRecorder.record_dsl();
+:转交 DSLController.process_script(dsl_text);
+if (收到结果: success?) then (yes)
+  :向视图展示结果/消息\n可能更新结构与画布;
+else
+  :向视图显示错误信息;
+endif
+stop
+@enduml

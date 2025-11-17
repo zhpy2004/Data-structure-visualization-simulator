@@ -1,0 +1,27 @@
+@startuml
+title LinearController.handle_action
+start
+:接收 action_type 与 params;
+if (create?) then (yes)
+  :_create_structure(type, data, capacity);
+elseif (insert?) then (yes)
+  :_insert_element(index, value);
+elseif (delete at?) then (yes)
+  :_delete_element(index);
+elseif (get at?) then (yes)
+  :_get_element(index);
+elseif (push?) then (yes)
+  :_push_element(value);
+elseif (pop?) then (yes)
+  :_pop_element();
+elseif (peek?) then (yes)
+  :_peek_top();
+elseif (clear?) then (yes)
+  :_clear_structure();
+else
+  :未知动作 -> 报错;
+endif
+:_update_view();
+:OperationRecorder.record_linear_action(action_type, params);
+stop
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+title TreeController.handle_action
+start
+:接收 action_type 与 params;
+if (create?) then (yes)
+  :_create_structure(type, initial_values);
+elseif (build bst/avl?) then (yes)
+  :将插入序列入队\n设置动画状态;
+  :_start_next_bst_build_insert();
+elseif (insert?) then (yes)
+  :_insert_value(value, position?);
+elseif (remove?) then (yes)
+  :_remove_value(value, position?);
+elseif (search?) then (yes)
+  :_search_value(value);
+elseif (traverse binarytree?) then (yes)
+  :按遍历类型处理 (pre/in/post/level);
+elseif (encode/decode huffman?) then (yes)
+  :使用 HuffmanTree 执行编码/解码;
+elseif (clear?) then (yes)
+  :_clear_tree();
+else
+  :未知动作 -> 报错;
+endif
+:_update_view();
+:OperationRecorder.record_tree_action(action_type, params);
+stop
+@enduml

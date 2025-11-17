@@ -1,0 +1,23 @@
+@startuml
+title LLMAgent.generate_dsl (含外部LLM与启发式)
+start
+:规范分隔符 (中文/英文标点统一);
+if (外部 LLM 已配置?) then (yes)
+  :通过 _call_llm_openai 调用外部服务\n(兼容OpenAI/HTTP);
+  if (返回 DSL?) then (yes)
+    :直接返回 DSL;
+  else
+    :回退至启发式;
+  endif
+endif
+if (context_target 为 None?) then (yes)
+  :按关键字估计上下文 (tree/linear);
+endif
+:尝试 _linear_nl_to_dsl / _tree_nl_to_dsl;
+if (匹配成功?) then (yes)
+  :返回 DSL;
+else
+  :返回 None;
+endif
+stop
+@enduml

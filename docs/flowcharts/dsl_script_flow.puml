@@ -1,0 +1,14 @@
+[{
+	"resource": "/e:/competition/entry/src/main/ets/utils/csv.ts",
+	"owner": "typescript",
+	"code": "2307",
+	"severity": 8,
+	"message": "找不到模块“@kit.AbilityKit”或其相应的类型声明。",
+	"source": "ts",
+	"startLineNumber": 5,
+	"startColumn": 39,
+	"endLineNumber": 5,
+	"endColumn": 56,
+	"origin": "extHost1",
+	"extensionID": "vscode.typescript-language-features"
+}]

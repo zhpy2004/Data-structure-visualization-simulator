@@ -299,6 +299,15 @@ class HuffmanTree:
         """生成哈夫曼编码"""
         self.codes = {}
         self._generate_codes_recursive(self.root, "")
+        # 单字符频率的特殊情况：只有一个叶子时，编码为空字符串，
+        # 为了可用性，将其标准化为"0"，以便编码/解码均正常工作。
+        try:
+            if len(self.codes) == 1:
+                only_char = next(iter(self.codes))
+                if self.codes.get(only_char, "") == "":
+                    self.codes[only_char] = "0"
+        except Exception:
+            pass
     
     def _generate_codes_recursive(self, node, code):
         """递归生成哈夫曼编码
@@ -336,9 +345,8 @@ class HuffmanTree:
             if char in self.codes:
                 encoded += self.codes[char]
             else:
-                # 对于不在编码表中的字符，可以选择忽略或使用特殊编码
-                pass
-        
+                # 未在编码表中的字符视为错误，提示调用方
+                raise ValueError(f"字符 '{char}' 不在编码表中")
         return encoded
     
     def decode(self, encoded):

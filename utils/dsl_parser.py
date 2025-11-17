@@ -239,7 +239,21 @@ class TreeDSLTransformer(Transformer):
         })
     
     @v_args(inline=True)
-    def insert_cmd(self, value, position=None, structure_name=None):
+    def insert_cmd(self, *children):
+        # children can be:
+        # [value, structure_name] when position is omitted
+        # [value, position(list), structure_name] when position is present
+        value = children[0] if len(children) >= 1 else None
+        position = None
+        structure_name = None
+        if len(children) == 3:
+            position = children[1]
+            structure_name = children[2]
+        elif len(children) == 2:
+            second = children[1]
+            # position rule returns a list; structure_name is a Token
+            position = second if isinstance(second, list) else None
+            structure_name = None if isinstance(second, list) else second
         return ("insert", {
             "value": value,
             "position": position,
@@ -247,7 +261,20 @@ class TreeDSLTransformer(Transformer):
         })
     
     @v_args(inline=True)
-    def delete_cmd(self, value, position=None, structure_name=None):
+    def delete_cmd(self, *children):
+        # children can be:
+        # [value, structure_name] when position is omitted
+        # [value, position(list), structure_name] when position is present
+        value = children[0] if len(children) >= 1 else None
+        position = None
+        structure_name = None
+        if len(children) == 3:
+            position = children[1]
+            structure_name = children[2]
+        elif len(children) == 2:
+            second = children[1]
+            position = second if isinstance(second, list) else None
+            structure_name = None if isinstance(second, list) else second
         return ("delete", {
             "value": value,
             "position": position,
