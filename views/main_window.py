@@ -18,6 +18,7 @@ from utils.theme import get_app_qss
 from services.operation_recorder import OperationRecorder
 import re
 import html as _html
+import os
 
 
 class MainWindow(QMainWindow):
@@ -208,32 +209,132 @@ class MainWindow(QMainWindow):
         """
         tab_name = self.tab_widget.tabText(index)
         self.status_bar.showMessage(f"当前选项卡: {tab_name}")
+
+    def _build_dsl_help_pages(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        doc_path = os.path.join(base_dir, "..", "docs", "DSL_命令参考.md")
+        try:
+            with open(doc_path, "r", encoding="utf-8") as f:
+                lines = [l.rstrip("\n") for l in f.readlines()]
+        except Exception:
+            return None
+        pages = {}
+        h2 = None
+        sub = None
+        lin_general = []
+        lin_ll = []
+        lin_stack = []
+        tree_general = []
+        binarytree = []
+        bst = []
+        avl = []
+        huffman = []
+        prefix_tree = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith("## "):
+                h2 = line[3:].strip()
+                sub = None
+                i += 1
+                continue
+            if h2 == "线性结构（arraylist / linkedlist / stack）":
+                if line.startswith("ArrayList / LinkedList"):
+                    sub = "ll"
+                    i += 1
+                    continue
+                if line.startswith("Stack（栈）"):
+                    sub = "stack"
+                    i += 1
+                    continue
+                if sub is None:
+                    lin_general.append(line)
+                elif sub == "ll":
+                    lin_ll.append(line)
+                elif sub == "stack":
+                    lin_stack.append(line)
+                i += 1
+                continue
+            if h2 and h2.startswith("树形结构"):
+                if line.startswith("BinaryTree"):
+                    sub = "binarytree"
+                    i += 1
+                    continue
+                if line.startswith("BST"):
+                    sub = "bst"
+                    i += 1
+                    continue
+                if line.startswith("AVL"):
+                    sub = "avl"
+                    i += 1
+                    continue
+                if line.startswith("Huffman"):
+                    sub = "huffman"
+                    i += 1
+                    continue
+                if sub is None:
+                    tree_general.append(line)
+                elif sub == "binarytree":
+                    binarytree.append(line)
+                elif sub == "bst":
+                    bst.append(line)
+                elif sub == "avl":
+                    avl.append(line)
+                elif sub == "huffman":
+                    huffman.append(line)
+                i += 1
+                continue
+            if h2 and h2.startswith("带前缀的树命令"):
+                prefix_tree.append(line)
+                i += 1
+                continue
+            i += 1
+        pages["线性通用"] = "\n".join(lin_general).strip()
+        pages["顺序表/链表"] = "\n".join(lin_ll).strip()
+        pages["栈"] = "\n".join(lin_stack).strip()
+        pages["树形通用"] = "\n".join(tree_general).strip()
+        pages["二叉树"] = "\n".join(binarytree).strip()
+        pages["BST"] = "\n".join(bst).strip()
+        pages["AVL"] = "\n".join(avl).strip()
+        pages["哈夫曼"] = "\n".join(huffman).strip()
+        if any(prefix_tree):
+            pages["树命令前缀风格"] = "\n".join(prefix_tree).strip()
+        return pages
     
     def _show_help(self):
-        """显示帮助信息"""
-        help_text = """
-        数据结构可视化模拟器使用帮助：
-        
-        1. 线性结构操作：
-           - 在"线性结构"选项卡中可以创建和操作顺序表、链表和栈
-           - 使用界面上的按钮进行插入、删除等操作
-        
-        2. 树形结构操作：
-           - 在"树形结构"选项卡中可以创建和操作二叉树、二叉搜索树和哈夫曼树
-           - 使用界面上的按钮进行插入、删除、搜索等操作
-        
-        3. DSL命令：
-           - 在"DSL命令"选项卡中可以使用自定义命令语言操作数据结构
-           - 命令格式：结构类型.操作(参数)
-           
-           示例命令：
-           - linear.create_array_list([1, 2, 3, 4, 5])
-           - linear.insert(2, 10)
-           - tree.create_bst([5, 3, 7, 2, 4, 6, 8])
-           - tree.search(4)
-        """
-        
-        QMessageBox.information(self, "帮助", help_text)
+        pages = self._build_dsl_help_pages()
+        if not pages:
+            QMessageBox.information(self, "帮助", "未找到 DSL 命令参考文档")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("DSL 命令帮助")
+        layout = QVBoxLayout(dlg)
+        tabs = QTabWidget(dlg)
+        layout.addWidget(tabs)
+        order = [
+            "线性通用",
+            "顺序表/链表",
+            "栈",
+            "树形通用",
+            "二叉树",
+            "BST",
+            "AVL",
+            "哈夫曼",
+            "树命令前缀风格",
+        ]
+        for name in order:
+            if name not in pages:
+                continue
+            text = pages.get(name, "")
+            w = QWidget()
+            v = QVBoxLayout(w)
+            te = QTextEdit(w)
+            te.setReadOnly(True)
+            te.setMarkdown(text)
+            v.addWidget(te)
+            tabs.addTab(w, name)
+        dlg.resize(900, 600)
+        dlg.exec_()
     
     def _show_about(self):
         """显示关于信息"""
