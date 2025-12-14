@@ -69,29 +69,22 @@ class TreeController:
                 if self.current_tree is None or not isinstance(self.current_tree, BST):
                     self.current_tree = BST()
                     self.structure_type = 'bst'
-                # 同步视图到 BST
                 self._ensure_view_structure('bst')
-                # 使用模型的构建步骤直接构建，避免依赖视图回调导致模型不同步
                 steps = []
                 try:
                     steps = self.current_tree.build_with_steps(values)
                 except Exception:
-                    # 回退为直接逐个插入，确保最终模型正确
-                    self.current_tree.clear()
-                    for v in values:
-                        self.current_tree.insert(v)
-                # 视图有批量动画接口则播放，否则直接刷新
-                if hasattr(self.view, 'show_bst_build_animation'):
-                    try:
-                        self.view.show_bst_build_animation(steps)
-                    except Exception:
-                        self._update_view()
+                    steps = []
+                if steps and hasattr(self.view, 'show_bst_build_animation'):
+                    self.view.show_bst_build_animation(steps)
                 else:
+                    try:
+                        self.current_tree.clear()
+                        for v in values:
+                            self.current_tree.insert(v)
+                    except Exception:
+                        pass
                     self._update_view()
-                # 构建流程标志复位，清空队列
-                self._bst_build_values_queue = []
-                self._bst_build_in_progress = False
-                # 允许后续插入操作
                 try:
                     if hasattr(self.view, 'insert_button'):
                         self.view.insert_button.setEnabled(True)
@@ -343,24 +336,37 @@ class TreeController:
             self.view.show_message("错误", "请先创建树结构")
             return
         try:
-            # BST：先播放删除路径动画，动画结束后由视图回调执行删除
             if self.structure_type == 'bst' and not execute_only:
-                found, path = self.current_tree.search(value)
-                if hasattr(self.view, 'highlight_bst_delete_path'):
-                    # 播放路径高亮，但不依赖视图回调，仍立即执行删除
-                    self.view.highlight_bst_delete_path(path, value)
-                # 直接执行删除
-                before_state = self.current_tree.get_visualization_data()
-                if hasattr(self.current_tree, 'delete'):
-                    self.current_tree.delete(value)
-                elif hasattr(self.current_tree, 'remove'):
-                    self.current_tree.remove(value)
-                after_state = self.current_tree.get_visualization_data()
-                if hasattr(self.view, 'update_visualization_with_animation'):
-                    self.view.update_visualization_with_animation(before_state, after_state, 'delete', value=value)
-                else:
-                    self._update_view()
-                return
+                try:
+                    steps = []
+                    if hasattr(self.current_tree, 'delete_with_steps'):
+                        steps = self.current_tree.delete_with_steps(value)
+                    if steps and hasattr(self.view, 'show_bst_delete_animation'):
+                        self.view.show_bst_delete_animation(steps, deleted_value=value)
+                    else:
+                        before_state = self.current_tree.get_visualization_data()
+                        if hasattr(self.current_tree, 'delete'):
+                            self.current_tree.delete(value)
+                        elif hasattr(self.current_tree, 'remove'):
+                            self.current_tree.remove(value)
+                        after_state = self.current_tree.get_visualization_data()
+                        if hasattr(self.view, 'update_visualization_with_animation'):
+                            self.view.update_visualization_with_animation(before_state, after_state, 'delete', value=value)
+                        else:
+                            self._update_view()
+                    return
+                except Exception:
+                    before_state = self.current_tree.get_visualization_data()
+                    if hasattr(self.current_tree, 'delete'):
+                        self.current_tree.delete(value)
+                    elif hasattr(self.current_tree, 'remove'):
+                        self.current_tree.remove(value)
+                    after_state = self.current_tree.get_visualization_data()
+                    if hasattr(self.view, 'update_visualization_with_animation'):
+                        self.view.update_visualization_with_animation(before_state, after_state, 'delete', value=value)
+                    else:
+                        self._update_view()
+                    return
             
             # AVL：生成删除步骤动画
             if self.structure_type == 'avl_tree' and not execute_only:

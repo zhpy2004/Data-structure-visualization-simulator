@@ -50,10 +50,6 @@ class AVLTree:
     def _rotate_left(self, z: AVLNode) -> AVLNode:
         y = z.right
         t2 = y.left
-        y.left = z
-        z.right = t2
-        if t2:
-            t2.parent = z
         y.parent = z.parent
         if z.parent:
             if z.parent.left is z:
@@ -62,6 +58,10 @@ class AVLTree:
                 z.parent.right = y
         else:
             self.root = y
+        z.right = t2
+        if t2:
+            t2.parent = z
+        y.left = z
         z.parent = y
         self._update(z)
         self._update(y)
@@ -70,10 +70,6 @@ class AVLTree:
     def _rotate_right(self, z: AVLNode) -> AVLNode:
         y = z.left
         t3 = y.right
-        y.right = z
-        z.left = t3
-        if t3:
-            t3.parent = z
         y.parent = z.parent
         if z.parent:
             if z.parent.left is z:
@@ -82,9 +78,101 @@ class AVLTree:
                 z.parent.right = y
         else:
             self.root = y
+        z.left = t3
+        if t3:
+            t3.parent = z
+        y.right = z
         z.parent = y
         self._update(z)
         self._update(y)
+        return y
+
+    def _rotate_left_with_steps(self, z: AVLNode, steps):
+        y = z.right
+        t2 = y.left
+        steps.append({
+            "description": f"左旋准备：选取 y={y.value}",
+            "highlight_nodes": [z.id, y.id],
+            "tree": self._snapshot(),
+        })
+        y.parent = z.parent
+        if z.parent:
+            if z.parent.left is z:
+                z.parent.left = y
+            else:
+                z.parent.right = y
+        else:
+            self.root = y
+        steps.append({
+            "description": "连接 y 到父节点/根",
+            "highlight_nodes": [y.id, z.parent.id if z.parent else None],
+            "tree": self._snapshot(),
+        })
+        z.right = t2
+        if t2:
+            t2.parent = z
+        steps.append({
+            "description": "重挂 y.left 到 z.right",
+            "highlight_nodes": [z.id, y.id],
+            "tree": self._snapshot(),
+        })
+        y.left = z
+        z.parent = y
+        steps.append({
+            "description": "设置 y.left = z",
+            "highlight_nodes": [y.id, z.id],
+            "tree": self._snapshot(),
+        })
+        self._update(z)
+        self._update(y)
+        steps.append({
+            "description": "更新高度",
+            "tree": self._snapshot(),
+        })
+        return y
+
+    def _rotate_right_with_steps(self, z: AVLNode, steps):
+        y = z.left
+        t3 = y.right
+        steps.append({
+            "description": f"右旋准备：选取 y={y.value}",
+            "highlight_nodes": [z.id, y.id],
+            "tree": self._snapshot(),
+        })
+        y.parent = z.parent
+        if z.parent:
+            if z.parent.left is z:
+                z.parent.left = y
+            else:
+                z.parent.right = y
+        else:
+            self.root = y
+        steps.append({
+            "description": "连接 y 到父节点/根",
+            "highlight_nodes": [y.id, z.parent.id if z.parent else None],
+            "tree": self._snapshot(),
+        })
+        z.left = t3
+        if t3:
+            t3.parent = z
+        steps.append({
+            "description": "重挂 y.right 到 z.left",
+            "highlight_nodes": [z.id, y.id],
+            "tree": self._snapshot(),
+        })
+        y.right = z
+        z.parent = y
+        steps.append({
+            "description": "设置 y.right = z",
+            "highlight_nodes": [y.id, z.id],
+            "tree": self._snapshot(),
+        })
+        self._update(z)
+        self._update(y)
+        steps.append({
+            "description": "更新高度",
+            "tree": self._snapshot(),
+        })
         return y
 
     # ---------- 快照 ----------
@@ -170,6 +258,11 @@ class AVLTree:
             n = self.root
             parent = None
             while n:
+                steps.append({
+                    "description": f"插入路径到节点 {n.value}",
+                    "highlight_nodes": [n.id],
+                    "tree": self._snapshot(),
+                })
                 parent = n
                 # 重复值：忽略插入
                 if v == n.value:
@@ -200,10 +293,10 @@ class AVLTree:
                 "highlight_nodes": [new_node.id],
                 "tree": self._snapshot(),
             })
-            # 逐步再平衡（按首次不平衡点，单步展示）
+            # 逐步再平衡（优先沿插入路径向上寻找最近的不平衡祖先）
             self._update_heights_all()
             while True:
-                z = self._first_unbalanced()
+                z = self._first_unbalanced_from_node(new_node)
                 if not z:
                     break
                 bfz = self._bf(z)
@@ -216,7 +309,7 @@ class AVLTree:
                             "highlight_nodes": [z.id, z.left.id if z.left else None],
                             "tree": self._snapshot(),
                         })
-                        self._rotate_right(z)
+                        self._rotate_right_with_steps(z, steps)
                         self._update_heights_all()
                         steps.append({
                             "description": "完成右旋",
@@ -228,8 +321,8 @@ class AVLTree:
                             "highlight_nodes": [z.id, z.left.id if z.left else None],
                             "tree": self._snapshot(),
                         })
-                        self._rotate_left(z.left)
-                        self._rotate_right(z)
+                        self._rotate_left_with_steps(z.left, steps)
+                        self._rotate_right_with_steps(z, steps)
                         self._update_heights_all()
                         steps.append({
                             "description": "完成 LR 旋转",
@@ -244,7 +337,7 @@ class AVLTree:
                             "highlight_nodes": [z.id, z.right.id if z.right else None],
                             "tree": self._snapshot(),
                         })
-                        self._rotate_left(z)
+                        self._rotate_left_with_steps(z, steps)
                         self._update_heights_all()
                         steps.append({
                             "description": "完成左旋",
@@ -256,8 +349,8 @@ class AVLTree:
                             "highlight_nodes": [z.id, z.right.id if z.right else None],
                             "tree": self._snapshot(),
                         })
-                        self._rotate_right(z.right)
-                        self._rotate_left(z)
+                        self._rotate_right_with_steps(z.right, steps)
+                        self._rotate_left_with_steps(z, steps)
                         self._update_heights_all()
                         steps.append({
                             "description": "完成 RL 旋转",
@@ -281,6 +374,15 @@ class AVLTree:
                 q.append(n.left)
             if n.right:
                 q.append(n.right)
+        return None
+
+    def _first_unbalanced_from_node(self, node: AVLNode) -> AVLNode:
+        cur = node
+        while cur:
+            bf = self._bf(cur)
+            if bf > 1 or bf < -1:
+                return cur
+            cur = cur.parent
         return None
 
     # ---------- 删除 ----------
@@ -358,7 +460,7 @@ class AVLTree:
                         "highlight_nodes": [z.id, z.left.id if z.left else None],
                         "tree": self._snapshot(),
                     })
-                    self._rotate_right(z)
+                    self._rotate_right_with_steps(z, steps)
                     self._update_heights_all()
                     steps.append({"description": "完成右旋", "tree": self._snapshot()})
                 else:
@@ -367,8 +469,8 @@ class AVLTree:
                         "highlight_nodes": [z.id, z.left.id if z.left else None],
                         "tree": self._snapshot(),
                     })
-                    self._rotate_left(z.left)
-                    self._rotate_right(z)
+                    self._rotate_left_with_steps(z.left, steps)
+                    self._rotate_right_with_steps(z, steps)
                     self._update_heights_all()
                     steps.append({"description": "完成 LR 旋转", "tree": self._snapshot()})
             else:
@@ -379,7 +481,7 @@ class AVLTree:
                         "highlight_nodes": [z.id, z.right.id if z.right else None],
                         "tree": self._snapshot(),
                     })
-                    self._rotate_left(z)
+                    self._rotate_left_with_steps(z, steps)
                     self._update_heights_all()
                     steps.append({"description": "完成左旋", "tree": self._snapshot()})
                 else:
@@ -388,8 +490,8 @@ class AVLTree:
                         "highlight_nodes": [z.id, z.right.id if z.right else None],
                         "tree": self._snapshot(),
                     })
-                    self._rotate_right(z.right)
-                    self._rotate_left(z)
+                    self._rotate_right_with_steps(z.right, steps)
+                    self._rotate_left_with_steps(z, steps)
                     self._update_heights_all()
                     steps.append({"description": "完成 RL 旋转", "tree": self._snapshot()})
         steps.append({"description": "删除完成", "tree": self._snapshot()})

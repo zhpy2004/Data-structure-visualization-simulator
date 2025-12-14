@@ -35,12 +35,14 @@ class TreeMockView:
     def highlight_traversal_path(self, result, traverse_type):
         print(f"[TreeView] traverse {traverse_type}: {result}")
     # Add search/insert/delete path highlights used by TreeController
-    def highlight_search_path(self, path, found, value):
-        print(f"[TreeView] search path={path}, found={found}, value={value}")
+    def highlight_search_path(self, path, found, search_value=None):
+        print(f"[TreeView] search path={path}, found={found}, value={search_value}")
     def highlight_bst_insert_path(self, path, value):
         print(f"[TreeView] bst insert path={path}, value={value}")
     def highlight_bst_delete_path(self, path, value):
         print(f"[TreeView] bst delete path={path}, value={value}")
+    def show_bst_delete_animation(self, steps, deleted_value=None):
+        print(f"[TreeView] BST delete steps={len(steps)} value={deleted_value}")
 
 # Wire controllers
 from controllers.linear_controller import LinearController
@@ -102,6 +104,13 @@ def main():
     # Run both contexts
     run_linear_tests(dsl_ctrl)
     run_tree_tests(dsl_ctrl)
+    from services.operation_recorder import OperationRecorder
+    print("\n=== Operation History: Linear ===")
+    print(OperationRecorder.get_history_text('linear'))
+    print("\n=== Operation History: Tree ===")
+    print(OperationRecorder.get_history_text('tree'))
+    print("\n=== Operation History: Combined ===")
+    print(OperationRecorder.get_history_text(None))
 
 
 if __name__ == "__main__":

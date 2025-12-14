@@ -322,40 +322,10 @@ from services.operation_recorder import OperationRecorder
 
 # --- Operation recording wrappers: record DSL and button actions ---
 try:
-    # Wrap DSL command handler to record successful executions
+    # Wrap button actions to record as DSL
     if not getattr(AppController, "_oprec_wrapped", False):
-        _orig_dsl = getattr(AppController, "_handle_dsl_command", None)
         _orig_lin = getattr(AppController, "_handle_linear_action", None)
         _orig_tree = getattr(AppController, "_handle_tree_action", None)
-
-        def _wrap_dsl(self, dsl_text: str):
-            ctx = getattr(self, "context_target", None)
-            try:
-                res = _orig_dsl(self, dsl_text)
-                # We cannot know success from return; conservatively record on invocation.
-                text = (dsl_text or "").strip()
-                if text:
-                    is_script = "\n" in text or ";" in text
-                    if is_script:
-                        parts = [p.strip() for p in text.replace("\n", ";").split(";")]
-                        for cmd in parts:
-                            if not cmd:
-                                continue
-                            cmd_low = cmd.lower()
-                            rec_ctx = "global" if cmd_low == "clear" else (ctx if ctx in ("linear", "tree") else None)
-                            OperationRecorder.record_dsl(cmd, rec_ctx or "linear", success=True, source="dsl")
-                    else:
-                        cmd_low = text.lower()
-                        rec_ctx = "global" if cmd_low == "clear" else (ctx if ctx in ("linear", "tree") else None)
-                        OperationRecorder.record_dsl(text, rec_ctx or "linear", success=True, source="dsl")
-                return res
-            except Exception:
-                # In case of handler error, still attempt to record the raw text
-                text = (dsl_text or "").strip()
-                if text:
-                    rec_ctx = ctx if ctx in ("linear", "tree") else None
-                    OperationRecorder.record_dsl(text, rec_ctx or "linear", success=False, source="dsl")
-                raise
 
         def _wrap_linear(self, action_type: str, params: dict):
             try:
@@ -389,8 +359,6 @@ try:
                 OperationRecorder.record_tree_action(action_type, params, struct_type, executed=False)
                 raise
 
-        if callable(_orig_dsl):
-            AppController._handle_dsl_command = _wrap_dsl
         if callable(_orig_lin):
             AppController._handle_linear_action = _wrap_linear
         if callable(_orig_tree):

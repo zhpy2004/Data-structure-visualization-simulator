@@ -139,27 +139,8 @@ class BST:
             return self._search(node.right, value, path)
     
     def delete(self, value):
-        """删除节点
-        
-        Args:
-            value: 删除的节点值
-            
-        Returns:
-            bool: 是否成功删除节点
-        """
-        if self.is_empty():
-            return False
-        
-        # 记录原始大小
-        original_size = self.size
-        
-        # 删除节点
-        self.root = self._delete(self.root, value)
-        
-        # 如果大小变化，说明删除成功
-        if self.size < original_size:
-            return True
-        return False
+        for _ in self.delete_with_steps(value) or []:
+            pass
     
     def _delete(self, node, value):
         """删除节点的递归辅助函数
@@ -375,7 +356,7 @@ class BST:
 
     # —— 新增：构建/插入步骤以支持BST构建动画 ——
     def insert_with_steps(self, value):
-        """返回插入一个值的步骤列表（用于动画）"""
+        """返回插入一个值的逐路径步骤列表（用于动画）"""
         v = int(value)
         steps = []
         # 初始快照与待插入节点
@@ -383,19 +364,36 @@ class BST:
             "description": f"开始插入 {v}",
             "pending_node": {"id": -1, "value": v},
             "tree": self.get_visualization_data(),
-            "highlight_values": []
         })
-        # 实际插入
-        before_root = self.root
+        # 逐步展示插入路径（沿当前树从根到目标位置）
+        try:
+            found, path = self.search(v)
+        except Exception:
+            found, path = False, []
+        for pv in list(path):
+            steps.append({
+                "description": f"插入路径到节点 {pv}",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [pv]
+            })
+        # 若值已存在：忽略插入
+        if found:
+            steps.append({
+                "description": f"值 {v} 已存在，忽略插入",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [v]
+            })
+            steps.append({"description": "插入完成", "tree": self.get_visualization_data()})
+            return steps
+        # 执行插入并展示结果快照
         self.insert(v)
-        # 插入后快照
         snap = self.get_visualization_data()
         steps.append({
             "description": f"插入 {v} 完成",
             "tree": snap,
             "highlight_values": [v]
         })
-        steps.append({"description": "插入完成", "tree": self.get_visualization_data()})
+        steps.append({"description": "插入完成", "tree": snap})
         return steps
 
     def build_with_steps(self, values):
@@ -411,4 +409,56 @@ class BST:
             insert_steps = self.insert_with_steps(v)
             steps.extend(insert_steps)
         steps.append({"description": "BST构建完成", "tree": self.get_visualization_data()})
+        return steps
+
+    def delete_with_steps(self, value):
+        v = int(value)
+        steps = []
+        steps.append({
+            "description": f"开始删除 {v}",
+            "tree": self.get_visualization_data(),
+        })
+        found, path = self.search(v)
+        for pv in list(path):
+            steps.append({
+                "description": f"搜索到节点 {pv}",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [pv]
+            })
+        if not found:
+            steps.append({"description": f"未找到 {v}", "tree": self.get_visualization_data()})
+            return steps
+        target = self.root
+        while target and target.data != v:
+            if v < target.data:
+                target = target.left
+            else:
+                target = target.right
+        if not target:
+            steps.append({"description": f"未找到 {v}", "tree": self.get_visualization_data()})
+            return steps
+        if target.left is None and target.right is None:
+            steps.append({
+                "description": f"删除叶子 {v}",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [v]
+            })
+        elif target.left is None or target.right is None:
+            child_val = target.right.data if target.right else target.left.data
+            steps.append({
+                "description": f"用子节点 {child_val} 替换 {v}",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [v, child_val]
+            })
+        else:
+            succ = self._find_min(target.right)
+            steps.append({
+                "description": f"用后继 {succ.data} 替换 {v}",
+                "tree": self.get_visualization_data(),
+                "highlight_values": [v, succ.data]
+            })
+        after = None
+        self.root = self._delete(self.root, v)
+        after = self.get_visualization_data()
+        steps.append({"description": "删除完成", "tree": after})
         return steps

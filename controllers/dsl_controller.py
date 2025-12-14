@@ -6,6 +6,7 @@ DSL控制器 - 用于处理DSL命令并连接UI与数据结构模型
 """
 
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from services.operation_recorder import OperationRecorder
 from models.tree.bst import BST
 from models.tree.avl_tree import AVLTree
 from models.tree.binary_tree import BinaryTree
@@ -56,6 +57,12 @@ class DSLController(QObject):
         """
         # 解析命令
         command, command_type = parse_dsl_command(command_str)
+        original_text = command_str
+        record_ctx = None
+        if command_type in ("linear", "tree", "global"):
+            record_ctx = command_type
+        else:
+            record_ctx = self.context_target if self.context_target in ("linear", "tree") else None
         
         # 兼容解析结果为元组的情况：('command', {payload})
         if isinstance(command, tuple) and len(command) == 2 and isinstance(command[0], str) and isinstance(command[1], dict):
@@ -67,6 +74,10 @@ class DSLController(QObject):
                 "message": command.get("error", "未知错误"),
                 "target": None
             })
+            try:
+                OperationRecorder.record_dsl(original_text, (record_ctx or "linear"), success=False, source="dsl")
+            except Exception:
+                pass
             return False
         
         # 全局命令：不受视图上下文限制
@@ -89,6 +100,10 @@ class DSLController(QObject):
                     "result": None,
                     "target": None
                 })
+                try:
+                    OperationRecorder.record_dsl(original_text, "global", success=True, source="dsl")
+                except Exception:
+                    pass
                 return True
         
         # 上下文类型过滤：当前在某个视图时，仅允许该类型命令
@@ -97,18 +112,42 @@ class DSLController(QObject):
                 "message": f"当前为{self.context_target}视图，只能执行{self.context_target}命令",
                 "target": self.context_target
             })
+            try:
+                OperationRecorder.record_dsl(original_text, (self.context_target or "linear"), success=False, source="dsl")
+            except Exception:
+                pass
             return False
         
         # 根据命令类型分发到相应的控制器
         if command_type == "linear":
-            return self._process_linear_command(command)
+            ok = False
+            try:
+                ok = self._process_linear_command(command)
+            finally:
+                try:
+                    OperationRecorder.record_dsl(original_text, "linear", success=bool(ok), source="dsl")
+                except Exception:
+                    pass
+            return ok
         elif command_type == "tree":
-            return self._process_tree_command(command)
+            ok = False
+            try:
+                ok = self._process_tree_command(command)
+            finally:
+                try:
+                    OperationRecorder.record_dsl(original_text, "tree", success=bool(ok), source="dsl")
+                except Exception:
+                    pass
+            return ok
         else:
             self.command_result.emit("error", {
                 "message": "无法识别的命令类型",
                 "target": None
             })
+            try:
+                OperationRecorder.record_dsl(original_text, (record_ctx or "linear"), success=False, source="dsl")
+            except Exception:
+                pass
             return False
     
     def _ensure_linear_structure(self, structure_name):

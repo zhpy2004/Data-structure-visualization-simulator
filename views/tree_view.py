@@ -315,22 +315,40 @@ class TreeView(QWidget):
         
         # 初始化哈夫曼动画相关属性
         self.huffman_animation_timer = QTimer()
+        try:
+            self.huffman_animation_timer.setTimerType(Qt.PreciseTimer)
+        except Exception:
+            pass
         self.animation_speed = 1000  # 默认动画速度：1秒一步
         self.huffman_build_steps = []
         self.current_build_step = 0
         
         # 初始化AVL动画相关属性
         self.avl_animation_timer = QTimer()
+        try:
+            self.avl_animation_timer.setTimerType(Qt.PreciseTimer)
+        except Exception:
+            pass
         self.avl_build_steps = []
         self.current_avl_step = 0
         
         # 初始化BST动画相关属性
         self.bst_animation_timer = QTimer()
+        try:
+            self.bst_animation_timer.setTimerType(Qt.PreciseTimer)
+        except Exception:
+            pass
         self.bst_build_steps = []
         self.current_bst_step = 0
+        self.bst_delete_steps = []
+        self.current_bst_delete_step = 0
         
         # 二叉树遍历播放控制（仿线性表）
         self.traversal_play_timer = QTimer(self)
+        try:
+            self.traversal_play_timer.setTimerType(Qt.PreciseTimer)
+        except Exception:
+            pass
         self.traversal_play_timer.timeout.connect(self._on_traversal_timer_tick)
         self.traversal_is_playing = False
         self.traversal_play_base_interval_ms = 800
@@ -1795,6 +1813,17 @@ class TreeView(QWidget):
         
         # 开始动画
         self.start_bst_build_animation()
+
+    def show_bst_delete_animation(self, delete_steps, deleted_value=None):
+        if not delete_steps:
+            return
+        self.stop_bst_animation()
+        self.bst_delete_steps = delete_steps
+        self.current_bst_delete_step = 0
+        self.deleted_value = deleted_value
+        self.status_label.setText(f"BST删除动画开始，共{len(delete_steps)}步")
+        self._configure_timeline_slider()
+        self.start_bst_delete_animation()
  
     def start_bst_build_animation(self):
         """开始BST构建动画"""
@@ -1829,32 +1858,91 @@ class TreeView(QWidget):
             self.replay_button.setEnabled(True)
         
         self.status_label.setText(f"BST构建步骤 1/{len(self.bst_build_steps)}")
-        
-        # 自动播放
-        self.bst_animation_timer.start(self.animation_speed)
+        try:
+            self._configure_timeline_slider()
+        except Exception:
+            pass
+        self.bst_animation_timer.start(self._current_traversal_interval_ms())
+
+    def start_bst_delete_animation(self):
+        if not getattr(self, 'bst_delete_steps', []):
+            return
+        if hasattr(self, 'huffman_animation_timer') and self.huffman_animation_timer.isActive():
+            self.huffman_animation_timer.stop()
+        if hasattr(self, 'avl_animation_timer') and self.avl_animation_timer.isActive():
+            self.avl_animation_timer.stop()
+        if hasattr(self, 'bst_animation_timer') and self.bst_animation_timer.isActive():
+            self.bst_animation_timer.stop()
+        try:
+            if hasattr(self, 'traversal_play_timer') and self.traversal_play_timer.isActive():
+                self.traversal_play_timer.stop()
+                self.traversal_is_playing = False
+        except Exception:
+            pass
+        self.current_bst_delete_step = 0
+        self._show_bst_delete_step(0)
+        if hasattr(self, 'prev_step_button'):
+            self.prev_step_button.setEnabled(False)
+        if hasattr(self, 'next_step_button'):
+            self.next_step_button.setEnabled(True)
+        if hasattr(self, 'play_button'):
+            self.play_button.setEnabled(True)
+            self.play_button.setText("暂停")
+        if hasattr(self, 'replay_button'):
+            self.replay_button.setEnabled(True)
+        self.status_label.setText(f"BST删除步骤 1/{len(self.bst_delete_steps)}")
+        try:
+            self._configure_timeline_slider()
+        except Exception:
+            pass
+        self.bst_animation_timer.start(self._current_traversal_interval_ms())
  
     def stop_bst_animation(self):
         """停止BST构建动画"""
         if hasattr(self, 'bst_animation_timer') and self.bst_animation_timer.isActive():
             self.bst_animation_timer.stop()
         self.current_bst_step = 0
+        self.current_bst_delete_step = 0
+        self.bst_delete_steps = []
  
     def _animate_bst_build(self):
-        """BST构建动画处理函数"""
+        if getattr(self, 'bst_delete_steps', []):
+            self.current_bst_delete_step += 1
+            if self.current_bst_delete_step >= len(self.bst_delete_steps):
+                self.bst_animation_timer.stop()
+                self.status_label.setText("BST删除动画完成")
+                return
+            self._show_bst_delete_step(self.current_bst_delete_step)
+            try:
+                if hasattr(self, 'timeline_slider'):
+                    self._updating_slider = True
+                    self.timeline_slider.setEnabled(True)
+                    self.timeline_slider.setMinimum(0)
+                    self.timeline_slider.setMaximum(max(0, len(self.bst_delete_steps) - 1))
+                    self.timeline_slider.setValue(self.current_bst_delete_step)
+                    self._updating_slider = False
+            except Exception:
+                pass
+            return
         if not getattr(self, 'bst_build_steps', []):
             self.bst_animation_timer.stop()
             return
-        
-        # 移动到下一步
         self.current_bst_step += 1
-        
-        # 检查是否完成动画
         if self.current_bst_step >= len(self.bst_build_steps):
             self.bst_animation_timer.stop()
             self.status_label.setText("BST构建动画完成")
             return
-        
         self._show_bst_step(self.current_bst_step)
+        try:
+            if hasattr(self, 'timeline_slider'):
+                self._updating_slider = True
+                self.timeline_slider.setEnabled(True)
+                self.timeline_slider.setMinimum(0)
+                self.timeline_slider.setMaximum(max(0, len(self.bst_build_steps) - 1))
+                self.timeline_slider.setValue(self.current_bst_step)
+                self._updating_slider = False
+        except Exception:
+            pass
  
     def _show_bst_step(self, step_index):
         """显示BST构建的某一步（兼容快照并计算坐标）"""
@@ -1920,7 +2008,48 @@ class TreeView(QWidget):
             QApplication.processEvents()
         except Exception:
             pass
- 
+
+    def _show_bst_delete_step(self, step_index):
+        if not hasattr(self, 'bst_delete_steps') or step_index < 0 or step_index >= len(self.bst_delete_steps):
+            return
+        step_data = self.bst_delete_steps[step_index]
+        description = step_data.get('description') or step_data.get('action') or f"步骤 {step_index + 1}"
+        self.status_label.setText(f"步骤 {step_index + 1}/{len(self.bst_delete_steps)}: {description}")
+        visualization_data = {
+            'type': 'bst',
+            'nodes': [],
+            'highlighted': []
+        }
+        tree_snapshot = step_data.get('tree') or step_data.get('current_tree') or step_data.get('tree_data')
+        if tree_snapshot:
+            nodes = tree_snapshot.get('nodes', [])
+            for node in nodes:
+                n = {
+                    'id': node.get('id'),
+                    'value': node.get('value', node.get('data')),
+                    'level': node.get('level', 0),
+                    'x_pos': node.get('x_pos', 0.5),
+                    'parent_id': node.get('parent_id') if node.get('parent_id') is not None else node.get('parent')
+                }
+                visualization_data['nodes'].append(n)
+        highlight_values = step_data.get('highlight_values', [])
+        if highlight_values and visualization_data['nodes']:
+            value_to_id = {}
+            for n in visualization_data['nodes']:
+                v = n.get('value')
+                if v is not None and n.get('id') is not None:
+                    value_to_id.setdefault(v, []).append(n.get('id'))
+            highlighted_ids = []
+            for v in highlight_values:
+                ids = value_to_id.get(v) or []
+                highlighted_ids.extend(ids)
+            visualization_data['highlighted'] = highlighted_ids
+        try:
+            self.canvas.update_data(visualization_data)
+            self.canvas.update()
+            QApplication.processEvents()
+        except Exception:
+            pass
     def _prev_bst_step(self):
         """显示BST构建的上一步"""
         if not getattr(self, 'bst_build_steps', []):
@@ -1948,6 +2077,52 @@ class TreeView(QWidget):
                 self.status_label.setText(f"BST构建步骤 {self.current_bst_step + 1}/{len(self.bst_build_steps)}")
         else:
             self.status_label.setText("BST构建完成")
+
+    def _prev_bst_delete_step(self):
+        if not getattr(self, 'bst_delete_steps', []):
+            return
+        if self.current_bst_delete_step > 0:
+            self.current_bst_delete_step -= 1
+            self._show_bst_delete_step(self.current_bst_delete_step)
+            self.next_step_button.setEnabled(True)
+            if self.current_bst_delete_step == 0:
+                self.prev_step_button.setEnabled(False)
+            self.status_label.setText(f"BST删除步骤 {self.current_bst_delete_step + 1}/{len(self.bst_delete_steps)}")
+            try:
+                if hasattr(self, 'timeline_slider'):
+                    self._updating_slider = True
+                    self.timeline_slider.setEnabled(True)
+                    self.timeline_slider.setMinimum(0)
+                    self.timeline_slider.setMaximum(max(0, len(self.bst_delete_steps) - 1))
+                    self.timeline_slider.setValue(self.current_bst_delete_step)
+                    self._updating_slider = False
+            except Exception:
+                pass
+
+    def _next_bst_delete_step(self):
+        if not getattr(self, 'bst_delete_steps', []):
+            return
+        if self.current_bst_delete_step < len(self.bst_delete_steps) - 1:
+            self.current_bst_delete_step += 1
+            self._show_bst_delete_step(self.current_bst_delete_step)
+            self.prev_step_button.setEnabled(True)
+            if self.current_bst_delete_step == len(self.bst_delete_steps) - 1:
+                self.next_step_button.setEnabled(False)
+                self.status_label.setText("BST删除完成")
+            else:
+                self.status_label.setText(f"BST删除步骤 {self.current_bst_delete_step + 1}/{len(self.bst_delete_steps)}")
+            try:
+                if hasattr(self, 'timeline_slider'):
+                    self._updating_slider = True
+                    self.timeline_slider.setEnabled(True)
+                    self.timeline_slider.setMinimum(0)
+                    self.timeline_slider.setMaximum(max(0, len(self.bst_delete_steps) - 1))
+                    self.timeline_slider.setValue(self.current_bst_delete_step)
+                    self._updating_slider = False
+            except Exception:
+                pass
+        else:
+            self.status_label.setText("BST删除完成")
  
     def show_result(self, operation, result):
         """显示操作结果
@@ -2042,7 +2217,8 @@ class TreeView(QWidget):
         # 然后检查AVL树构建动画
         elif hasattr(self, 'avl_build_steps') and self.avl_build_steps:
             self._prev_avl_step()
-        # 然后检查BST构建动画
+        elif hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+            self._prev_bst_delete_step()
         elif hasattr(self, 'bst_build_steps') and self.bst_build_steps:
             self._prev_bst_step()
         # 然后检查哈夫曼树构建动画
@@ -2062,7 +2238,8 @@ class TreeView(QWidget):
         # 然后检查AVL树构建动画
         elif hasattr(self, 'avl_build_steps') and self.avl_build_steps:
             self._next_avl_step()
-        # 然后检查BST构建动画
+        elif hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+            self._next_bst_delete_step()
         elif hasattr(self, 'bst_build_steps') and self.bst_build_steps:
             self._next_bst_step()
         # 然后检查哈夫曼树构建动画
@@ -2547,6 +2724,10 @@ class TreeView(QWidget):
         
         if hasattr(self, 'status_label'):
             self.status_label.setText(f"AVL树构建步骤 1/{len(self.avl_build_steps)}")
+        try:
+            self._configure_timeline_slider()
+        except Exception:
+            pass
         
         # 启用播放/重播按钮并设为播放中
         if hasattr(self, 'play_button'):
@@ -2557,7 +2738,7 @@ class TreeView(QWidget):
         
         # 自动播放AVL构建动画
         if hasattr(self, 'avl_animation_timer'):
-            self.avl_animation_timer.start(self.animation_speed)
+            self.avl_animation_timer.start(self._current_traversal_interval_ms())
 
     def _animate_avl_build(self):
         """AVL树动画处理函数（构建/删除通用）"""
@@ -2592,6 +2773,16 @@ class TreeView(QWidget):
 
         # 显示当前步骤
         show_fn(self.current_avl_step)
+        try:
+            if hasattr(self, 'timeline_slider'):
+                self._updating_slider = True
+                self.timeline_slider.setEnabled(True)
+                self.timeline_slider.setMinimum(0)
+                self.timeline_slider.setMaximum(max(0, len(active_steps) - 1))
+                self.timeline_slider.setValue(self.current_avl_step)
+                self._updating_slider = False
+        except Exception:
+            pass
     
     def start_avl_delete_animation(self):
         """开始AVL树删除动画"""
@@ -2910,7 +3101,10 @@ class TreeView(QWidget):
         if hasattr(self, 'bst_build_steps') and self.bst_build_steps:
             total_steps = len(self.bst_build_steps)
             if getattr(self, 'current_bst_step', 0) >= total_steps:
-                self.stop_bst_animation()
+                try:
+                    self.bst_animation_timer.stop()
+                except Exception:
+                    pass
                 self.start_bst_build_animation()
                 return
             if self.bst_animation_timer.isActive():
@@ -2920,7 +3114,31 @@ class TreeView(QWidget):
                 if hasattr(self, 'status_label'):
                     self.status_label.setText("已暂停")
             else:
-                self.bst_animation_timer.start(self.animation_speed)
+                self.bst_animation_timer.start(self._current_traversal_interval_ms())
+                if hasattr(self, 'play_button'):
+                    self.play_button.setText("暂停")
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText("播放中……")
+            return
+
+        # 若处于BST删除动画场景，控制BST定时器
+        if hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+            total_steps = len(self.bst_delete_steps)
+            if getattr(self, 'current_bst_delete_step', 0) >= total_steps:
+                try:
+                    self.bst_animation_timer.stop()
+                except Exception:
+                    pass
+                self.start_bst_delete_animation()
+                return
+            if self.bst_animation_timer.isActive():
+                self.bst_animation_timer.stop()
+                if hasattr(self, 'play_button'):
+                    self.play_button.setText("播放")
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText("已暂停")
+            else:
+                self.bst_animation_timer.start(self._current_traversal_interval_ms())
                 if hasattr(self, 'play_button'):
                     self.play_button.setText("暂停")
                 if hasattr(self, 'status_label'):
@@ -2980,6 +3198,25 @@ class TreeView(QWidget):
         if hasattr(self, 'bst_build_steps') and self.bst_build_steps:
             self.stop_bst_animation()
             self.start_bst_build_animation()
+            if hasattr(self, 'play_button'):
+                self.play_button.setText("暂停")
+            return
+        # 若为BST删除动画，执行重播并返回
+        if hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+            try:
+                if self.bst_animation_timer.isActive():
+                    self.bst_animation_timer.stop()
+            except Exception:
+                pass
+            # 重置索引并展示第一步
+            self.current_bst_delete_step = 0
+            self._show_bst_delete_step(0)
+            try:
+                self._configure_timeline_slider()
+            except Exception:
+                pass
+            # 重启定时播放
+            self.bst_animation_timer.start(self._current_traversal_interval_ms())
             if hasattr(self, 'play_button'):
                 self.play_button.setText("暂停")
             return
@@ -3195,8 +3432,18 @@ class TreeView(QWidget):
                 self.speed_value_label.setText(self.speed_combo.currentText())
         except Exception:
             pass
-        if self.traversal_is_playing:
-            self.traversal_play_timer.start(self._current_traversal_interval_ms())
+        interval = self._current_traversal_interval_ms()
+        try:
+            if hasattr(self, 'traversal_play_timer') and self.traversal_is_playing:
+                self.traversal_play_timer.start(interval)
+            if hasattr(self, 'huffman_animation_timer') and self.huffman_animation_timer.isActive():
+                self.huffman_animation_timer.start(interval)
+            if hasattr(self, 'avl_animation_timer') and self.avl_animation_timer.isActive():
+                self.avl_animation_timer.start(interval)
+            if hasattr(self, 'bst_animation_timer') and self.bst_animation_timer.isActive():
+                self.bst_animation_timer.start(interval)
+        except Exception:
+            pass
 
     def _configure_timeline_slider(self):
         """根据当前遍历步骤配置时间轴滑块范围与当前位置"""
@@ -3207,6 +3454,15 @@ class TreeView(QWidget):
             if hasattr(self, 'huffman_build_steps') and self.huffman_build_steps:
                 total = len(self.huffman_build_steps)
                 cur = max(0, getattr(self, 'current_build_step', 0))
+            elif hasattr(self, 'avl_build_steps') and self.avl_build_steps:
+                total = len(self.avl_build_steps)
+                cur = max(0, getattr(self, 'current_avl_step', 0))
+            elif hasattr(self, 'bst_build_steps') and self.bst_build_steps:
+                total = len(self.bst_build_steps)
+                cur = max(0, getattr(self, 'current_bst_step', 0))
+            elif hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+                total = len(self.bst_delete_steps)
+                cur = max(0, getattr(self, 'current_bst_delete_step', 0))
             else:
                 total = len(self.canvas.node_id_map) if hasattr(self.canvas, 'node_id_map') else 0
                 cur = max(0, getattr(self.canvas, 'current_traversal_index', 0))
@@ -3259,6 +3515,76 @@ class TreeView(QWidget):
                     return
                 self.current_build_step = idx
                 self._show_huffman_step(idx)
+                try:
+                    if hasattr(self, 'prev_step_button'):
+                        self.prev_step_button.setEnabled(idx > 0)
+                    if hasattr(self, 'next_step_button'):
+                        self.next_step_button.setEnabled(idx < steps - 1)
+                except Exception:
+                    pass
+                return
+            if hasattr(self, 'avl_build_steps') and self.avl_build_steps:
+                try:
+                    if self.avl_animation_timer.isActive():
+                        self.avl_animation_timer.stop()
+                    if hasattr(self, 'play_button'):
+                        self.play_button.setText("播放")
+                except Exception:
+                    pass
+                steps = len(self.avl_build_steps)
+                idx = int(value)
+                idx = max(0, min(idx, steps - 1))
+                if idx == getattr(self, 'current_avl_step', 0):
+                    return
+                self.current_avl_step = idx
+                self._show_avl_step(idx)
+                try:
+                    if hasattr(self, 'prev_step_button'):
+                        self.prev_step_button.setEnabled(idx > 0)
+                    if hasattr(self, 'next_step_button'):
+                        self.next_step_button.setEnabled(idx < steps - 1)
+                except Exception:
+                    pass
+                return
+            if hasattr(self, 'bst_build_steps') and self.bst_build_steps:
+                try:
+                    if self.bst_animation_timer.isActive():
+                        self.bst_animation_timer.stop()
+                    if hasattr(self, 'play_button'):
+                        self.play_button.setText("播放")
+                except Exception:
+                    pass
+                steps = len(self.bst_build_steps)
+                idx = int(value)
+                idx = max(0, min(idx, steps - 1))
+                if idx == getattr(self, 'current_bst_step', 0):
+                    return
+                self.current_bst_step = idx
+                self._show_bst_step(idx)
+                try:
+                    if hasattr(self, 'prev_step_button'):
+                        self.prev_step_button.setEnabled(idx > 0)
+                    if hasattr(self, 'next_step_button'):
+                        self.next_step_button.setEnabled(idx < steps - 1)
+                except Exception:
+                    pass
+                return
+            # 支持BST删除动画的时间轴拖动
+            if hasattr(self, 'bst_delete_steps') and self.bst_delete_steps:
+                try:
+                    if self.bst_animation_timer.isActive():
+                        self.bst_animation_timer.stop()
+                    if hasattr(self, 'play_button'):
+                        self.play_button.setText("播放")
+                except Exception:
+                    pass
+                steps = len(self.bst_delete_steps)
+                idx = int(value)
+                idx = max(0, min(idx, steps - 1))
+                if idx == getattr(self, 'current_bst_delete_step', 0):
+                    return
+                self.current_bst_delete_step = idx
+                self._show_bst_delete_step(idx)
                 try:
                     if hasattr(self, 'prev_step_button'):
                         self.prev_step_button.setEnabled(idx > 0)
